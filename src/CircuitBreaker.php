@@ -3,12 +3,9 @@
 namespace Harris21\Fuse;
 
 use GuzzleHttp\Exception\ClientException;
-use GuzzleHttp\Exception\ConnectException;
-use GuzzleHttp\Exception\ServerException;
 use Harris21\Fuse\Events\CircuitBreakerClosed;
 use Harris21\Fuse\Events\CircuitBreakerHalfOpen;
 use Harris21\Fuse\Events\CircuitBreakerOpened;
-use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Cache;
 use Symfony\Component\HttpKernel\Exception\TooManyRequestsHttpException;
 use Throwable;
@@ -33,7 +30,6 @@ class CircuitBreaker
         ?int $timeout = null,
         ?int $minRequests = null
     ) {
-        // Load from config with fallback chain
         $config = config("fuse.services.{$serviceName}", []);
 
         $this->failureThreshold = $failureThreshold
@@ -49,47 +45,33 @@ class CircuitBreaker
             ?? config('fuse.default_min_requests', 10);
     }
 
-    /**
-     * Check if the circuit breaker is available for requests.
-     * Handles state transitions from OPEN to HALF_OPEN when timeout elapses.
-     */
     public function isAvailable(): bool
     {
         $state = $this->getState();
 
-        // CLOSED: Always available
         if ($state === self::STATE_CLOSED) {
             return true;
         }
 
-        // OPEN: Check if timeout elapsed
         if ($state === self::STATE_OPEN) {
             $openedAt = Cache::get($this->key('opened_at'));
 
-            // Move to HALF-OPEN after timeout
             if ($openedAt && (time() - $openedAt) >= $this->timeout) {
                 $this->transitionToHalfOpen();
 
-                return true; // Allow test requests
+                return true;
             }
 
-            return false; // Still protecting
+            return false;
         }
 
-        // HALF-OPEN: Use lock for single probe
         if ($state === self::STATE_HALF_OPEN) {
-            $lock = Cache::lock($this->key('probe'), 5);
-
-            // Only one worker at a time gets to probe
-            return $lock->get();
+            return Cache::lock($this->key('probe'), 5)->get();
         }
 
         return true;
     }
 
-    /**
-     * Check if the circuit is currently open (blocking requests).
-     */
     public function isOpen(): bool
     {
         $state = $this->getState();
@@ -98,7 +80,6 @@ class CircuitBreaker
             return false;
         }
 
-        // Check if we should transition to half-open
         $openedAt = Cache::get($this->key('opened_at'));
         if ($openedAt && (time() - $openedAt) >= $this->timeout) {
             $this->transitionToHalfOpen();
@@ -109,143 +90,83 @@ class CircuitBreaker
         return true;
     }
 
-    /**
-     * Check if the circuit is in half-open state (testing recovery).
-     */
     public function isHalfOpen(): bool
     {
         return $this->getState() === self::STATE_HALF_OPEN;
     }
 
-    /**
-     * Check if the circuit is closed (normal operation).
-     */
     public function isClosed(): bool
     {
         return $this->getState() === self::STATE_CLOSED;
     }
 
-    /**
-     * Record a successful request. May close the circuit if in HALF_OPEN state.
-     */
     public function recordSuccess(): void
     {
         $window = $this->getCurrentWindow();
+        $this->incrementCounter($this->key("attempts:{$window}"));
 
-        // Increment attempt counter
-        Cache::increment($this->key("attempts:{$window}"));
-
-        // Set TTL on the counter (2 minutes)
-        $attempts = Cache::get($this->key("attempts:{$window}"));
-        Cache::put($this->key("attempts:{$window}"), $attempts, 120);
-
-        // If we're in HALF-OPEN state, close the circuit
         if ($this->getState() === self::STATE_HALF_OPEN) {
             $this->transitionToClosed();
         }
 
-        // Release probe lock if we hold it
         Cache::lock($this->key('probe'))->forceRelease();
     }
 
-    /**
-     * Record a failed request. May open the circuit if threshold exceeded.
-     * Optionally pass the exception for intelligent failure classification.
-     */
     public function recordFailure(?Throwable $exception = null): void
     {
-        // If an exception is provided, check if we should count it
+        $window = $this->getCurrentWindow();
+        $attemptsKey = $this->key("attempts:{$window}");
+        $failuresKey = $this->key("failures:{$window}");
+
         if ($exception !== null && ! $this->shouldCountFailure($exception)) {
-            // Don't count this failure (e.g., rate limits, auth errors)
-            // Still increment attempts for tracking purposes
-            $window = $this->getCurrentWindow();
-            Cache::increment($this->key("attempts:{$window}"));
-            $attempts = Cache::get($this->key("attempts:{$window}"));
-            Cache::put($this->key("attempts:{$window}"), $attempts, 120);
+            $this->incrementCounter($attemptsKey);
 
             return;
         }
 
-        // If in HALF-OPEN state, failure means we go back to OPEN
         if ($this->getState() === self::STATE_HALF_OPEN) {
-            $this->transitionToOpen(100, 1, 1); // 100% failure rate for the probe
+            $this->transitionToOpen(100, 1, 1);
             Cache::lock($this->key('probe'))->forceRelease();
 
             return;
         }
 
-        // Fixed window approach - one minute buckets
-        $window = $this->getCurrentWindow();
-
-        // Increment counters for this minute
-        Cache::increment($this->key("attempts:{$window}"));
-        Cache::increment($this->key("failures:{$window}"));
-
-        // Set expiration - old data disappears automatically
-        $attempts = Cache::get($this->key("attempts:{$window}"));
-        $failures = Cache::get($this->key("failures:{$window}"));
-
-        Cache::put($this->key("attempts:{$window}"), $attempts, 120);
-        Cache::put($this->key("failures:{$window}"), $failures, 120);
-
-        // Calculate failure rate as percentage
+        $attempts = $this->incrementCounter($attemptsKey);
+        $failures = $this->incrementCounter($failuresKey);
         $failureRate = $attempts > 0 ? ($failures / $attempts) * 100 : 0;
 
-        // Should we open the circuit?
-        // Need minimum requests AND failure rate threshold
         if ($attempts >= $this->minRequests && $failureRate >= $this->failureThreshold) {
             $this->transitionToOpen($failureRate, $attempts, $failures);
         }
     }
 
     /**
-     * Determine if an exception should be counted as a circuit breaker failure.
-     *
-     * This implements intelligent failure classification:
-     * - DON'T count: Rate limits (429), Auth errors (401/403)
+     * Intelligent failure classification:
+     * - DON'T count: Rate limits (429), Auth errors (401/403) - service is healthy
      * - DO count: Server errors (5xx), Timeouts, Connection failures
      */
     private function shouldCountFailure(Throwable $e): bool
     {
-        // DON'T count rate limits - service is healthy, just rate limiting us
         if ($e instanceof TooManyRequestsHttpException) {
             return false;
         }
 
-        // Check for Guzzle/HTTP client exceptions with match expression
         if ($e instanceof ClientException) {
             return match ($e->getResponse()?->getStatusCode()) {
-                429 => false,       // Rate Limited: Service is healthy
-                401, 403 => false,  // Auth errors: Configuration problem
-                default => true,    // Other client errors: count them
+                429, 401, 403 => false,
+                default => true,
             };
         }
 
-        // DO count server errors (500, 502, 503, 504)
-        if ($e instanceof ServerException) {
-            return true;
-        }
-
-        // DO count connection failures
-        if ($e instanceof ConnectionException || $e instanceof ConnectException) {
-            return true;
-        }
-
-        // Default: count it as a failure
         return true;
     }
 
-    /**
-     * Get the current state of the circuit.
-     */
     public function getState(): string
     {
         return Cache::get($this->key('state'), self::STATE_CLOSED);
     }
 
     /**
-     * Get current statistics for the circuit.
-     *
      * @return array{state: string, attempts: int, failures: int, failure_rate: float, opened_at: ?int, recovery_at: ?int}
      */
     public function getStats(): array
@@ -269,9 +190,6 @@ class CircuitBreaker
         ];
     }
 
-    /**
-     * Force reset the circuit to closed state.
-     */
     public function reset(): void
     {
         $window = $this->getCurrentWindow();
@@ -284,16 +202,11 @@ class CircuitBreaker
         Cache::lock($this->key('transition'))->forceRelease();
     }
 
-    /**
-     * Transition to OPEN state.
-     */
     private function transitionToOpen(float $failureRate, int $attempts, int $failures): void
     {
-        // Use lock to prevent race conditions
         $lock = Cache::lock($this->key('transition'), 5);
 
         $acquired = $lock->get(function () {
-            // Double-check we're not already open
             if ($this->getState() === self::STATE_OPEN) {
                 return false;
             }
@@ -305,18 +218,10 @@ class CircuitBreaker
         });
 
         if ($acquired) {
-            event(new CircuitBreakerOpened(
-                $this->serviceName,
-                $failureRate,
-                $attempts,
-                $failures
-            ));
+            event(new CircuitBreakerOpened($this->serviceName, $failureRate, $attempts, $failures));
         }
     }
 
-    /**
-     * Transition to HALF_OPEN state.
-     */
     private function transitionToHalfOpen(): void
     {
         $lock = Cache::lock($this->key('transition'), 5);
@@ -336,9 +241,6 @@ class CircuitBreaker
         }
     }
 
-    /**
-     * Transition to CLOSED state.
-     */
     private function transitionToClosed(): void
     {
         $lock = Cache::lock($this->key('transition'), 5);
@@ -359,17 +261,28 @@ class CircuitBreaker
         }
     }
 
-    /**
-     * Get the current window key (minute bucket).
-     */
     private function getCurrentWindow(): string
     {
         return now()->format('YmdHi');
     }
 
     /**
-     * Generate a cache key for this circuit breaker.
+     * Increment counter with support for all cache drivers (database/file don't auto-create on increment).
      */
+    private function incrementCounter(string $key, int $ttl = 120): int
+    {
+        Cache::add($key, 0, $ttl);
+        $result = Cache::increment($key);
+
+        if ($result !== false) {
+            Cache::put($key, (int) $result, $ttl);
+
+            return (int) $result;
+        }
+
+        return (int) Cache::get($key, 1);
+    }
+
     private function key(string $suffix): string
     {
         return "fuse:{$this->serviceName}:{$suffix}";

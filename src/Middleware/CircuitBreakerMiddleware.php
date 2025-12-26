@@ -12,31 +12,23 @@ class CircuitBreakerMiddleware
         private readonly string $service
     ) {}
 
-    /**
-     * Process the job through the circuit breaker.
-     */
     public function handle(mixed $job, callable $next): mixed
     {
-        // Check if circuit breaker is enabled
         if (! $this->isEnabled()) {
             return $next($job);
         }
 
         $breaker = new CircuitBreaker($this->service);
 
-        // Circuit OPEN: Delay the job, don't fail it!
         if ($breaker->isOpen()) {
-            // Job will retry in 10 seconds
-            // Appears as "Delayed" in Horizon, not "Failed"
             return $job->release(10);
         }
 
-        // Circuit HALF-OPEN: Single probe logic
+        // HALF-OPEN: Only one worker probes, others wait
         if ($breaker->isHalfOpen()) {
             $lock = Cache::lock("fuse:{$this->service}:probe", 5);
 
             if ($lock->get()) {
-                // This worker gets to probe
                 try {
                     $result = $next($job);
                     $breaker->recordSuccess();
@@ -50,11 +42,9 @@ class CircuitBreakerMiddleware
                 }
             }
 
-            // Other workers: delay and try later
             return $job->release(10);
         }
 
-        // Circuit CLOSED: Normal operation
         try {
             $result = $next($job);
             $breaker->recordSuccess();
@@ -66,20 +56,14 @@ class CircuitBreakerMiddleware
         }
     }
 
-    /**
-     * Check if circuit breaker is enabled.
-     * Cache value overrides config for runtime toggling.
-     */
     private function isEnabled(): bool
     {
-        // Check cache first (for runtime toggling)
         $cacheValue = Cache::get('fuse:enabled');
 
         if ($cacheValue !== null) {
             return (bool) $cacheValue;
         }
 
-        // Fall back to config
         return config('fuse.enabled', true);
     }
 }
