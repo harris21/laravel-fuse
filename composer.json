@@ -1,0 +1,48 @@
+{
+    "name": "harris21/laravel-fuse",
+    "description": "Circuit breaker for Laravel queue jobs. Protect your workers from cascading failures.",
+    "keywords": ["laravel", "circuit-breaker", "queue", "jobs", "resilience", "fuse"],
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "Harris Raftopoulos",
+            "homepage": "https://x.com/harrisrafto"
+        }
+    ],
+    "require": {
+        "php": "^8.3",
+        "illuminate/cache": "^11.0|^12.0",
+        "illuminate/contracts": "^11.0|^12.0",
+        "illuminate/support": "^11.0|^12.0",
+        "spatie/laravel-package-tools": "^1.16"
+    },
+    "require-dev": {
+        "orchestra/testbench": "^9.0|^10.0",
+        "pestphp/pest": "^3.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "Harris21\\Fuse\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Harris21\\Fuse\\Tests\\": "tests/"
+        }
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "Harris21\\Fuse\\FuseServiceProvider"
+            ]
+        }
+    },
+    "config": {
+        "sort-packages": true,
+        "allow-plugins": {
+            "pestphp/pest-plugin": true
+        }
+    },
+    "minimum-stability": "dev",
+    "prefer-stable": true
+}
