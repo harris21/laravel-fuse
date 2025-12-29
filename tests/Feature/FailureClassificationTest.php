@@ -17,12 +17,10 @@ beforeEach(function () {
 it('does not count 429 TooManyRequestsHttpException as failure', function () {
     $breaker = new CircuitBreaker('test-service', failureThreshold: 50, minRequests: 5);
 
-    // Record 5 rate limit exceptions
     for ($i = 0; $i < 5; $i++) {
         $breaker->recordFailure(new TooManyRequestsHttpException());
     }
 
-    // Circuit should still be closed - rate limits don't count
     expect($breaker->isClosed())->toBeTrue();
     expect($breaker->getStats()['failures'])->toBe(0);
     expect($breaker->getStats()['attempts'])->toBe(5);
@@ -142,6 +140,36 @@ it('counts failures without exception parameter', function () {
 
     for ($i = 0; $i < 5; $i++) {
         $breaker->recordFailure();
+    }
+
+    expect($breaker->isOpen())->toBeTrue();
+    expect($breaker->getStats()['failures'])->toBe(5);
+});
+
+it('counts 404 not found errors as failures', function () {
+    $breaker = new CircuitBreaker('test-service', failureThreshold: 50, minRequests: 5);
+
+    $request = new Request('GET', 'https://api.example.com/missing');
+    $response = new Response(404);
+    $exception = new ClientException('Not Found', $request, $response);
+
+    for ($i = 0; $i < 5; $i++) {
+        $breaker->recordFailure($exception);
+    }
+
+    expect($breaker->isOpen())->toBeTrue();
+    expect($breaker->getStats()['failures'])->toBe(5);
+});
+
+it('counts 400 bad request errors as failures', function () {
+    $breaker = new CircuitBreaker('test-service', failureThreshold: 50, minRequests: 5);
+
+    $request = new Request('POST', 'https://api.example.com/endpoint');
+    $response = new Response(400);
+    $exception = new ClientException('Bad Request', $request, $response);
+
+    for ($i = 0; $i < 5; $i++) {
+        $breaker->recordFailure($exception);
     }
 
     expect($breaker->isOpen())->toBeTrue();

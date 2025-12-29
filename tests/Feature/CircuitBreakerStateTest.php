@@ -1,10 +1,16 @@
 <?php
 
+use Carbon\Carbon;
 use Harris21\Fuse\CircuitBreaker;
 use Illuminate\Support\Facades\Cache;
 
 beforeEach(function () {
     Cache::flush();
+    Carbon::setTestNow(Carbon::createFromTime(12, 0, 0));
+});
+
+afterEach(function () {
+    Carbon::setTestNow(null);
 });
 
 it('starts in closed state', function () {
@@ -19,7 +25,6 @@ it('starts in closed state', function () {
 it('transitions to open when failure threshold is exceeded', function () {
     $breaker = new CircuitBreaker('test-service', failureThreshold: 50, minRequests: 5);
 
-    // Record 5 failures (100% failure rate, above 50% threshold)
     for ($i = 0; $i < 5; $i++) {
         $breaker->recordFailure();
     }
@@ -31,7 +36,6 @@ it('transitions to open when failure threshold is exceeded', function () {
 it('does not open circuit if below minimum requests', function () {
     $breaker = new CircuitBreaker('test-service', failureThreshold: 50, minRequests: 10);
 
-    // Record only 5 failures (below 10 min requests)
     for ($i = 0; $i < 5; $i++) {
         $breaker->recordFailure();
     }
@@ -42,7 +46,6 @@ it('does not open circuit if below minimum requests', function () {
 it('does not open circuit if below failure threshold', function () {
     $breaker = new CircuitBreaker('test-service', failureThreshold: 50, minRequests: 10);
 
-    // Record 10 attempts: 4 failures, 6 successes (40% failure rate)
     for ($i = 0; $i < 4; $i++) {
         $breaker->recordFailure();
     }
@@ -56,17 +59,14 @@ it('does not open circuit if below failure threshold', function () {
 it('transitions to half-open after timeout', function () {
     $breaker = new CircuitBreaker('test-service', failureThreshold: 50, timeout: 1, minRequests: 5);
 
-    // Trip the circuit
     for ($i = 0; $i < 5; $i++) {
         $breaker->recordFailure();
     }
 
     expect($breaker->isOpen())->toBeTrue();
 
-    // Wait for timeout
     sleep(2);
 
-    // isOpen() should trigger the transition to half-open
     expect($breaker->isOpen())->toBeFalse();
     expect($breaker->isHalfOpen())->toBeTrue();
 });
@@ -74,18 +74,15 @@ it('transitions to half-open after timeout', function () {
 it('transitions to closed on success in half-open state', function () {
     $breaker = new CircuitBreaker('test-service', failureThreshold: 50, timeout: 1, minRequests: 5);
 
-    // Trip the circuit
     for ($i = 0; $i < 5; $i++) {
         $breaker->recordFailure();
     }
 
-    // Wait for half-open
     sleep(2);
-    $breaker->isOpen(); // Trigger transition
+    $breaker->isOpen();
 
     expect($breaker->isHalfOpen())->toBeTrue();
 
-    // Record success
     $breaker->recordSuccess();
 
     expect($breaker->isClosed())->toBeTrue();
@@ -94,18 +91,15 @@ it('transitions to closed on success in half-open state', function () {
 it('transitions back to open on failure in half-open state', function () {
     $breaker = new CircuitBreaker('test-service', failureThreshold: 50, timeout: 1, minRequests: 5);
 
-    // Trip the circuit
     for ($i = 0; $i < 5; $i++) {
         $breaker->recordFailure();
     }
 
-    // Wait for half-open
     sleep(2);
-    $breaker->isOpen(); // Trigger transition
+    $breaker->isOpen();
 
     expect($breaker->isHalfOpen())->toBeTrue();
 
-    // Record failure
     $breaker->recordFailure();
 
     expect($breaker->isOpen())->toBeTrue();
@@ -114,14 +108,12 @@ it('transitions back to open on failure in half-open state', function () {
 it('resets to closed state', function () {
     $breaker = new CircuitBreaker('test-service', failureThreshold: 50, minRequests: 5);
 
-    // Trip the circuit
     for ($i = 0; $i < 5; $i++) {
         $breaker->recordFailure();
     }
 
     expect($breaker->isOpen())->toBeTrue();
 
-    // Reset
     $breaker->reset();
 
     expect($breaker->isClosed())->toBeTrue();
@@ -132,7 +124,6 @@ it('resets to closed state', function () {
 it('returns correct stats', function () {
     $breaker = new CircuitBreaker('test-service', failureThreshold: 50, timeout: 60, minRequests: 10);
 
-    // Record some activity
     $breaker->recordSuccess();
     $breaker->recordSuccess();
     $breaker->recordFailure();
@@ -187,7 +178,6 @@ it('is available when closed', function () {
 it('is not available when open', function () {
     $breaker = new CircuitBreaker('test-service', failureThreshold: 50, minRequests: 5);
 
-    // Trip the circuit
     for ($i = 0; $i < 5; $i++) {
         $breaker->recordFailure();
     }
@@ -199,16 +189,81 @@ it('maintains separate state for different services', function () {
     $stripe = new CircuitBreaker('stripe', failureThreshold: 50, minRequests: 5);
     $mailgun = new CircuitBreaker('mailgun', failureThreshold: 50, minRequests: 5);
 
-    // Trip only the stripe circuit
     for ($i = 0; $i < 5; $i++) {
         $stripe->recordFailure();
     }
 
-    // Stripe should be open, mailgun should still be closed
     expect($stripe->isOpen())->toBeTrue();
     expect($mailgun->isClosed())->toBeTrue();
 
-    // Verify stats are independent
     expect($stripe->getStats()['failures'])->toBe(5);
     expect($mailgun->getStats()['failures'])->toBe(0);
+});
+
+it('uses peak hours threshold during peak hours via ThresholdCalculator', function () {
+    Carbon::setTestNow(Carbon::createFromTime(12, 0, 0));
+
+    config(['fuse.services.stripe' => [
+        'threshold' => 40,
+        'peak_hours_threshold' => 70,
+        'peak_hours_start' => 9,
+        'peak_hours_end' => 17,
+    ]]);
+
+    $breaker = new CircuitBreaker('stripe');
+    $stats = $breaker->getStats();
+
+    expect($stats['threshold'])->toBe(70);
+});
+
+it('uses regular threshold during off-peak hours via ThresholdCalculator', function () {
+    Carbon::setTestNow(Carbon::createFromTime(22, 0, 0));
+
+    config(['fuse.services.stripe' => [
+        'threshold' => 40,
+        'peak_hours_threshold' => 70,
+        'peak_hours_start' => 9,
+        'peak_hours_end' => 17,
+    ]]);
+
+    $breaker = new CircuitBreaker('stripe');
+    $stats = $breaker->getStats();
+
+    expect($stats['threshold'])->toBe(40);
+});
+
+it('trips at different thresholds based on time of day', function () {
+    $serviceConfig = [
+        'threshold' => 40,
+        'peak_hours_threshold' => 80,
+        'peak_hours_start' => 9,
+        'peak_hours_end' => 17,
+        'min_requests' => 10,
+    ];
+    config(['fuse.services.stripe-peak' => $serviceConfig]);
+    config(['fuse.services.stripe-offpeak' => $serviceConfig]);
+
+    Carbon::setTestNow(Carbon::createFromTime(12, 0, 0));
+    $peakBreaker = new CircuitBreaker('stripe-peak');
+
+    for ($i = 0; $i < 3; $i++) {
+        $peakBreaker->recordSuccess();
+    }
+    for ($i = 0; $i < 7; $i++) {
+        $peakBreaker->recordFailure();
+    }
+
+    expect($peakBreaker->isClosed())->toBeTrue();
+
+    Carbon::setTestNow(Carbon::createFromTime(22, 0, 0));
+    $offPeakBreaker = new CircuitBreaker('stripe-offpeak');
+
+    for ($i = 0; $i < 5; $i++) {
+        $offPeakBreaker->recordSuccess();
+    }
+    for ($i = 0; $i < 5; $i++) {
+        $offPeakBreaker->recordFailure();
+    }
+
+    expect($offPeakBreaker->isOpen())->toBeTrue();
 });

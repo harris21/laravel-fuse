@@ -75,7 +75,6 @@ it('executes job when circuit is closed', function () {
 });
 
 it('releases job when circuit is open', function () {
-    // Trip the circuit using a breaker (shares cache with middleware's breaker)
     $breaker = new CircuitBreaker('test-service');
     for ($i = 0; $i < 5; $i++) {
         $breaker->recordFailure();
@@ -150,7 +149,6 @@ it('cache override takes precedence over config for enabled state', function () 
     config(['fuse.enabled' => false]);
     Cache::put('fuse:enabled', true);
 
-    // Trip the circuit first
     $breaker = new CircuitBreaker('test-service');
     for ($i = 0; $i < 5; $i++) {
         $breaker->recordFailure();
@@ -173,7 +171,6 @@ it('cache override takes precedence over config for enabled state', function () 
         return 'success';
     });
 
-    // Since cache says enabled=true and circuit is open, job should be released
     expect($job->handled)->toBeFalse();
     expect($job->released)->toBeTrue();
 });
@@ -181,7 +178,6 @@ it('cache override takes precedence over config for enabled state', function () 
 it('executes probe and closes circuit on success in half-open state', function () {
     config(['fuse.default_timeout' => 1]);
 
-    // Trip the circuit
     $breaker = new CircuitBreaker('test-service');
     for ($i = 0; $i < 5; $i++) {
         $breaker->recordFailure();
@@ -189,11 +185,9 @@ it('executes probe and closes circuit on success in half-open state', function (
 
     expect($breaker->isOpen())->toBeTrue();
 
-    // Wait for half-open
     sleep(2);
 
-    // Verify it transitioned to half-open
-    $breaker->isOpen(); // Trigger transition check
+    $breaker->isOpen();
     expect($breaker->isHalfOpen())->toBeTrue();
 
     $middleware = new CircuitBreakerMiddleware('test-service');
@@ -203,7 +197,6 @@ it('executes probe and closes circuit on success in half-open state', function (
         public function release(int $delay): void {}
     };
 
-    // Execute job through middleware - should succeed and close circuit
     $middleware->handle($job, function ($job) {
         $job->handled = true;
 
@@ -212,7 +205,6 @@ it('executes probe and closes circuit on success in half-open state', function (
 
     expect($job->handled)->toBeTrue();
 
-    // Circuit should now be closed
     $freshBreaker = new CircuitBreaker('test-service');
     expect($freshBreaker->isClosed())->toBeTrue();
 });
@@ -220,15 +212,13 @@ it('executes probe and closes circuit on success in half-open state', function (
 it('reopens circuit on failure in half-open state', function () {
     config(['fuse.default_timeout' => 1]);
 
-    // Trip the circuit
     $breaker = new CircuitBreaker('test-service');
     for ($i = 0; $i < 5; $i++) {
         $breaker->recordFailure();
     }
 
-    // Wait for half-open
     sleep(2);
-    $breaker->isOpen(); // Trigger transition
+    $breaker->isOpen();
     expect($breaker->isHalfOpen())->toBeTrue();
 
     $middleware = new CircuitBreakerMiddleware('test-service');
@@ -236,16 +226,57 @@ it('reopens circuit on failure in half-open state', function () {
         public function release(int $delay): void {}
     };
 
-    // Execute job that fails
     try {
         $middleware->handle($job, function () {
             throw new Exception('Service still down');
         });
-    } catch (Exception $e) {
-        // Expected
+    } catch (Exception) {
     }
 
-    // Circuit should be back to open
     $freshBreaker = new CircuitBreaker('test-service');
     expect($freshBreaker->isOpen())->toBeTrue();
+});
+
+it('releases non-probe workers in half-open state', function () {
+    config(['fuse.default_timeout' => 1]);
+
+    $breaker = new CircuitBreaker('test-service');
+    for ($i = 0; $i < 5; $i++) {
+        $breaker->recordFailure();
+    }
+
+    sleep(2);
+    $breaker->isOpen();
+    expect($breaker->isHalfOpen())->toBeTrue();
+
+    $probeLock = Cache::lock('fuse:test-service:probe', 5);
+    expect($probeLock->get())->toBeTrue();
+
+    $middleware = new CircuitBreakerMiddleware('test-service');
+    $job = new class {
+        public bool $handled = false;
+        public bool $released = false;
+        public int $releaseDelay = 0;
+
+        public function release(int $delay): string
+        {
+            $this->released = true;
+            $this->releaseDelay = $delay;
+
+            return 'released';
+        }
+    };
+
+    $result = $middleware->handle($job, function ($job) {
+        $job->handled = true;
+
+        return 'success';
+    });
+
+    expect($job->handled)->toBeFalse();
+    expect($job->released)->toBeTrue();
+    expect($job->releaseDelay)->toBe(10);
+    expect($result)->toBe('released');
+
+    $probeLock->forceRelease();
 });

@@ -6,6 +6,7 @@ use GuzzleHttp\Exception\ClientException;
 use Harris21\Fuse\Events\CircuitBreakerClosed;
 use Harris21\Fuse\Events\CircuitBreakerHalfOpen;
 use Harris21\Fuse\Events\CircuitBreakerOpened;
+use Harris21\Fuse\ThresholdCalculator;
 use Illuminate\Support\Facades\Cache;
 use Symfony\Component\HttpKernel\Exception\TooManyRequestsHttpException;
 use Throwable;
@@ -33,8 +34,7 @@ class CircuitBreaker
         $config = config("fuse.services.{$serviceName}", []);
 
         $this->failureThreshold = $failureThreshold
-            ?? $config['threshold']
-            ?? config('fuse.default_threshold', 50);
+            ?? ThresholdCalculator::for($serviceName);
 
         $this->timeout = $timeout
             ?? $config['timeout']
