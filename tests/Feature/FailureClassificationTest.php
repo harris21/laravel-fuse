@@ -12,10 +12,15 @@ use Symfony\Component\HttpKernel\Exception\TooManyRequestsHttpException;
 
 beforeEach(function () {
     Cache::flush();
+    config(['fuse.services.test-service' => [
+        'threshold' => 50,
+        'timeout' => 60,
+        'min_requests' => 5,
+    ]]);
 });
 
 it('does not count 429 TooManyRequestsHttpException as failure', function () {
-    $breaker = new CircuitBreaker('test-service', failureThreshold: 50, minRequests: 5);
+    $breaker = new CircuitBreaker('test-service');
 
     for ($i = 0; $i < 5; $i++) {
         $breaker->recordFailure(new TooManyRequestsHttpException());
@@ -27,7 +32,7 @@ it('does not count 429 TooManyRequestsHttpException as failure', function () {
 });
 
 it('does not count 429 Guzzle ClientException as failure', function () {
-    $breaker = new CircuitBreaker('test-service', failureThreshold: 50, minRequests: 5);
+    $breaker = new CircuitBreaker('test-service');
 
     $request = new Request('GET', 'https://api.stripe.com');
     $response = new Response(429);
@@ -42,7 +47,7 @@ it('does not count 429 Guzzle ClientException as failure', function () {
 });
 
 it('does not count 401 auth errors as failure', function () {
-    $breaker = new CircuitBreaker('test-service', failureThreshold: 50, minRequests: 5);
+    $breaker = new CircuitBreaker('test-service');
 
     $request = new Request('GET', 'https://api.stripe.com');
     $response = new Response(401);
@@ -57,7 +62,7 @@ it('does not count 401 auth errors as failure', function () {
 });
 
 it('does not count 403 auth errors as failure', function () {
-    $breaker = new CircuitBreaker('test-service', failureThreshold: 50, minRequests: 5);
+    $breaker = new CircuitBreaker('test-service');
 
     $request = new Request('GET', 'https://api.stripe.com');
     $response = new Response(403);
@@ -72,7 +77,7 @@ it('does not count 403 auth errors as failure', function () {
 });
 
 it('counts 500 server errors as failures', function () {
-    $breaker = new CircuitBreaker('test-service', failureThreshold: 50, minRequests: 5);
+    $breaker = new CircuitBreaker('test-service');
 
     $request = new Request('GET', 'https://api.stripe.com');
     $response = new Response(500);
@@ -87,7 +92,7 @@ it('counts 500 server errors as failures', function () {
 });
 
 it('counts 503 server errors as failures', function () {
-    $breaker = new CircuitBreaker('test-service', failureThreshold: 50, minRequests: 5);
+    $breaker = new CircuitBreaker('test-service');
 
     $request = new Request('GET', 'https://api.stripe.com');
     $response = new Response(503);
@@ -101,7 +106,7 @@ it('counts 503 server errors as failures', function () {
 });
 
 it('counts Guzzle ConnectException as failure', function () {
-    $breaker = new CircuitBreaker('test-service', failureThreshold: 50, minRequests: 5);
+    $breaker = new CircuitBreaker('test-service');
 
     $request = new Request('GET', 'https://api.stripe.com');
     $exception = new ConnectException('Connection refused', $request);
@@ -114,7 +119,7 @@ it('counts Guzzle ConnectException as failure', function () {
 });
 
 it('counts Laravel ConnectionException as failure', function () {
-    $breaker = new CircuitBreaker('test-service', failureThreshold: 50, minRequests: 5);
+    $breaker = new CircuitBreaker('test-service');
 
     $exception = new ConnectionException('Connection timed out');
 
@@ -126,7 +131,7 @@ it('counts Laravel ConnectionException as failure', function () {
 });
 
 it('counts generic exceptions as failures', function () {
-    $breaker = new CircuitBreaker('test-service', failureThreshold: 50, minRequests: 5);
+    $breaker = new CircuitBreaker('test-service');
 
     for ($i = 0; $i < 5; $i++) {
         $breaker->recordFailure(new Exception('Something went wrong'));
@@ -136,7 +141,7 @@ it('counts generic exceptions as failures', function () {
 });
 
 it('counts failures without exception parameter', function () {
-    $breaker = new CircuitBreaker('test-service', failureThreshold: 50, minRequests: 5);
+    $breaker = new CircuitBreaker('test-service');
 
     for ($i = 0; $i < 5; $i++) {
         $breaker->recordFailure();
@@ -147,7 +152,7 @@ it('counts failures without exception parameter', function () {
 });
 
 it('counts 404 not found errors as failures', function () {
-    $breaker = new CircuitBreaker('test-service', failureThreshold: 50, minRequests: 5);
+    $breaker = new CircuitBreaker('test-service');
 
     $request = new Request('GET', 'https://api.example.com/missing');
     $response = new Response(404);
@@ -162,7 +167,7 @@ it('counts 404 not found errors as failures', function () {
 });
 
 it('counts 400 bad request errors as failures', function () {
-    $breaker = new CircuitBreaker('test-service', failureThreshold: 50, minRequests: 5);
+    $breaker = new CircuitBreaker('test-service');
 
     $request = new Request('POST', 'https://api.example.com/endpoint');
     $response = new Response(400);

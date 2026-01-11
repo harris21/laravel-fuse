@@ -9,12 +9,17 @@ use Illuminate\Support\Facades\Event;
 
 beforeEach(function () {
     Cache::flush();
+    config(['fuse.services.test-service' => [
+        'threshold' => 50,
+        'timeout' => 60,
+        'min_requests' => 5,
+    ]]);
 });
 
 it('dispatches CircuitBreakerOpened event when circuit opens', function () {
     Event::fake([CircuitBreakerOpened::class]);
 
-    $breaker = new CircuitBreaker('test-service', failureThreshold: 50, minRequests: 5);
+    $breaker = new CircuitBreaker('test-service');
 
     for ($i = 0; $i < 5; $i++) {
         $breaker->recordFailure();
@@ -31,7 +36,9 @@ it('dispatches CircuitBreakerOpened event when circuit opens', function () {
 it('dispatches CircuitBreakerHalfOpen event when circuit transitions to half-open', function () {
     Event::fake([CircuitBreakerOpened::class, CircuitBreakerHalfOpen::class]);
 
-    $breaker = new CircuitBreaker('test-service', failureThreshold: 50, timeout: 1, minRequests: 5);
+    config(['fuse.services.test-service.timeout' => 1]);
+
+    $breaker = new CircuitBreaker('test-service');
 
     for ($i = 0; $i < 5; $i++) {
         $breaker->recordFailure();
@@ -48,7 +55,9 @@ it('dispatches CircuitBreakerHalfOpen event when circuit transitions to half-ope
 it('dispatches CircuitBreakerClosed event when circuit closes from half-open', function () {
     Event::fake([CircuitBreakerOpened::class, CircuitBreakerHalfOpen::class, CircuitBreakerClosed::class]);
 
-    $breaker = new CircuitBreaker('test-service', failureThreshold: 50, timeout: 1, minRequests: 5);
+    config(['fuse.services.test-service.timeout' => 1]);
+
+    $breaker = new CircuitBreaker('test-service');
 
     for ($i = 0; $i < 5; $i++) {
         $breaker->recordFailure();
@@ -67,7 +76,7 @@ it('dispatches CircuitBreakerClosed event when circuit closes from half-open', f
 it('does not dispatch CircuitBreakerOpened event when already open', function () {
     Event::fake([CircuitBreakerOpened::class]);
 
-    $breaker = new CircuitBreaker('test-service', failureThreshold: 50, minRequests: 5);
+    $breaker = new CircuitBreaker('test-service');
 
     for ($i = 0; $i < 5; $i++) {
         $breaker->recordFailure();
@@ -83,7 +92,12 @@ it('does not dispatch CircuitBreakerOpened event when already open', function ()
 it('CircuitBreakerOpened event contains correct data', function () {
     Event::fake([CircuitBreakerOpened::class]);
 
-    $breaker = new CircuitBreaker('stripe', failureThreshold: 50, minRequests: 10);
+    config(['fuse.services.stripe' => [
+        'threshold' => 50,
+        'min_requests' => 10,
+    ]]);
+
+    $breaker = new CircuitBreaker('stripe');
 
     for ($i = 0; $i < 4; $i++) {
         $breaker->recordSuccess();
@@ -103,7 +117,9 @@ it('CircuitBreakerOpened event contains correct data', function () {
 it('dispatches CircuitBreakerOpened event when probe fails in half-open state', function () {
     Event::fake([CircuitBreakerOpened::class, CircuitBreakerHalfOpen::class]);
 
-    $breaker = new CircuitBreaker('test-service', failureThreshold: 50, timeout: 1, minRequests: 5);
+    config(['fuse.services.test-service.timeout' => 1]);
+
+    $breaker = new CircuitBreaker('test-service');
 
     for ($i = 0; $i < 5; $i++) {
         $breaker->recordFailure();

@@ -233,7 +233,7 @@ use Harris21\Fuse\CircuitBreaker;
 
 $breaker = new CircuitBreaker('stripe');
 
-if ($breaker->isAvailable()) {
+if (!$breaker->isOpen()) {
     try {
         $result = Stripe::charges()->create([...]);
         $breaker->recordSuccess();
@@ -256,7 +256,6 @@ $breaker = new CircuitBreaker('stripe');
 $breaker->isClosed();    // Normal operations
 $breaker->isOpen();      // Protected, failing fast
 $breaker->isHalfOpen();  // Testing recovery
-$breaker->isAvailable(); // Can we make requests?
 
 $breaker->getStats();    // Get full statistics
 $breaker->reset();       // Manually reset to closed

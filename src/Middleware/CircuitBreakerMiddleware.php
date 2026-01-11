@@ -24,9 +24,8 @@ class CircuitBreakerMiddleware
             return $job->release(10);
         }
 
-        // HALF-OPEN: Only one worker probes, others wait
         if ($breaker->isHalfOpen()) {
-            $lock = Cache::lock("fuse:{$this->service}:probe", 5);
+            $lock = Cache::lock($breaker->key('probe'), 5);
 
             if ($lock->get()) {
                 try {

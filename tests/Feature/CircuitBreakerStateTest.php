@@ -2,11 +2,17 @@
 
 use Carbon\Carbon;
 use Harris21\Fuse\CircuitBreaker;
+use Harris21\Fuse\Enums\CircuitState;
 use Illuminate\Support\Facades\Cache;
 
 beforeEach(function () {
     Cache::flush();
     Carbon::setTestNow(Carbon::createFromTime(12, 0, 0));
+    config(['fuse.services.test-service' => [
+        'threshold' => 50,
+        'timeout' => 60,
+        'min_requests' => 5,
+    ]]);
 });
 
 afterEach(function () {
@@ -16,35 +22,39 @@ afterEach(function () {
 it('starts in closed state', function () {
     $breaker = new CircuitBreaker('test-service');
 
-    expect($breaker->getState())->toBe('closed');
+    expect($breaker->getState())->toBe(CircuitState::Closed);
     expect($breaker->isClosed())->toBeTrue();
     expect($breaker->isOpen())->toBeFalse();
     expect($breaker->isHalfOpen())->toBeFalse();
 });
 
 it('transitions to open when failure threshold is exceeded', function () {
-    $breaker = new CircuitBreaker('test-service', failureThreshold: 50, minRequests: 5);
+    $breaker = new CircuitBreaker('test-service');
 
     for ($i = 0; $i < 5; $i++) {
         $breaker->recordFailure();
     }
 
-    expect($breaker->getState())->toBe('open');
+    expect($breaker->getState())->toBe(CircuitState::Open);
     expect($breaker->isOpen())->toBeTrue();
 });
 
 it('does not open circuit if below minimum requests', function () {
-    $breaker = new CircuitBreaker('test-service', failureThreshold: 50, minRequests: 10);
+    config(['fuse.services.test-service.min_requests' => 10]);
+
+    $breaker = new CircuitBreaker('test-service');
 
     for ($i = 0; $i < 5; $i++) {
         $breaker->recordFailure();
     }
 
-    expect($breaker->getState())->toBe('closed');
+    expect($breaker->getState())->toBe(CircuitState::Closed);
 });
 
 it('does not open circuit if below failure threshold', function () {
-    $breaker = new CircuitBreaker('test-service', failureThreshold: 50, minRequests: 10);
+    config(['fuse.services.test-service.min_requests' => 10]);
+
+    $breaker = new CircuitBreaker('test-service');
 
     for ($i = 0; $i < 4; $i++) {
         $breaker->recordFailure();
@@ -53,11 +63,13 @@ it('does not open circuit if below failure threshold', function () {
         $breaker->recordSuccess();
     }
 
-    expect($breaker->getState())->toBe('closed');
+    expect($breaker->getState())->toBe(CircuitState::Closed);
 });
 
 it('transitions to half-open after timeout', function () {
-    $breaker = new CircuitBreaker('test-service', failureThreshold: 50, timeout: 1, minRequests: 5);
+    config(['fuse.services.test-service.timeout' => 1]);
+
+    $breaker = new CircuitBreaker('test-service');
 
     for ($i = 0; $i < 5; $i++) {
         $breaker->recordFailure();
@@ -72,7 +84,9 @@ it('transitions to half-open after timeout', function () {
 });
 
 it('transitions to closed on success in half-open state', function () {
-    $breaker = new CircuitBreaker('test-service', failureThreshold: 50, timeout: 1, minRequests: 5);
+    config(['fuse.services.test-service.timeout' => 1]);
+
+    $breaker = new CircuitBreaker('test-service');
 
     for ($i = 0; $i < 5; $i++) {
         $breaker->recordFailure();
@@ -89,7 +103,9 @@ it('transitions to closed on success in half-open state', function () {
 });
 
 it('transitions back to open on failure in half-open state', function () {
-    $breaker = new CircuitBreaker('test-service', failureThreshold: 50, timeout: 1, minRequests: 5);
+    config(['fuse.services.test-service.timeout' => 1]);
+
+    $breaker = new CircuitBreaker('test-service');
 
     for ($i = 0; $i < 5; $i++) {
         $breaker->recordFailure();
@@ -106,7 +122,7 @@ it('transitions back to open on failure in half-open state', function () {
 });
 
 it('resets to closed state', function () {
-    $breaker = new CircuitBreaker('test-service', failureThreshold: 50, minRequests: 5);
+    $breaker = new CircuitBreaker('test-service');
 
     for ($i = 0; $i < 5; $i++) {
         $breaker->recordFailure();
@@ -122,7 +138,13 @@ it('resets to closed state', function () {
 });
 
 it('returns correct stats', function () {
-    $breaker = new CircuitBreaker('test-service', failureThreshold: 50, timeout: 60, minRequests: 10);
+    config(['fuse.services.test-service' => [
+        'threshold' => 50,
+        'timeout' => 60,
+        'min_requests' => 10,
+    ]]);
+
+    $breaker = new CircuitBreaker('test-service');
 
     $breaker->recordSuccess();
     $breaker->recordSuccess();
@@ -154,40 +176,18 @@ it('uses service-specific config', function () {
     expect($stats['min_requests'])->toBe(3);
 });
 
-it('constructor params override config', function () {
+it('maintains separate state for different services', function () {
     config(['fuse.services.stripe' => [
-        'threshold' => 30,
-        'timeout' => 120,
-        'min_requests' => 3,
+        'threshold' => 50,
+        'min_requests' => 5,
+    ]]);
+    config(['fuse.services.mailgun' => [
+        'threshold' => 50,
+        'min_requests' => 5,
     ]]);
 
-    $breaker = new CircuitBreaker('stripe', failureThreshold: 80, timeout: 30, minRequests: 20);
-    $stats = $breaker->getStats();
-
-    expect($stats['threshold'])->toBe(80);
-    expect($stats['timeout'])->toBe(30);
-    expect($stats['min_requests'])->toBe(20);
-});
-
-it('is available when closed', function () {
-    $breaker = new CircuitBreaker('test-service');
-
-    expect($breaker->isAvailable())->toBeTrue();
-});
-
-it('is not available when open', function () {
-    $breaker = new CircuitBreaker('test-service', failureThreshold: 50, minRequests: 5);
-
-    for ($i = 0; $i < 5; $i++) {
-        $breaker->recordFailure();
-    }
-
-    expect($breaker->isAvailable())->toBeFalse();
-});
-
-it('maintains separate state for different services', function () {
-    $stripe = new CircuitBreaker('stripe', failureThreshold: 50, minRequests: 5);
-    $mailgun = new CircuitBreaker('mailgun', failureThreshold: 50, minRequests: 5);
+    $stripe = new CircuitBreaker('stripe');
+    $mailgun = new CircuitBreaker('mailgun');
 
     for ($i = 0; $i < 5; $i++) {
         $stripe->recordFailure();
