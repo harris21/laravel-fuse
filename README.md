@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="art/logo.png" width="400" alt="Laravel Fuse">
+  <img src="art/logo.png" width="400" alt="Fuse for Laravel">
 </p>
 
 <p align="center">
