@@ -267,7 +267,7 @@ $breaker->reset();       // Manually reset to closed
 
 - PHP 8.3+
 - Laravel 11+
-- Redis (recommended) or any Laravel cache driver
+- Redis recommended for production, file cache may have race conditions during recovery probing
 
 ---
 
