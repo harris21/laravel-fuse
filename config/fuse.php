@@ -52,4 +52,34 @@ return [
         //     'peak_hours_end' => 17,
         // ],
     ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Status Page
+    |--------------------------------------------------------------------------
+    |
+    | Real-time circuit breaker status page. Disabled by default since it
+    | exposes operational data. Enable it and configure access control
+    | as needed for your environment.
+    |
+    | - enabled: Toggle the status page on/off
+    | - prefix: URL prefix for the status page routes
+    | - middleware: Additional middleware (replaces default StatusPageMiddleware)
+    | - polling_interval: Frontend polling interval in seconds
+    |
+    | Authorization is handled by the 'viewFuse' gate. By default, only
+    | the 'local' environment is allowed. Override the gate in your
+    | AppServiceProvider to customize access:
+    |
+    | Gate::define('viewFuse', function ($user) {
+    |     return in_array($user->email, ['admin@example.com']);
+    | });
+    |
+    */
+    'status_page' => [
+        'enabled' => env('FUSE_STATUS_PAGE_ENABLED', false),
+        'prefix' => env('FUSE_STATUS_PAGE_PREFIX', 'fuse'),
+        'middleware' => [],
+        'polling_interval' => 2,
+    ],
 ];
