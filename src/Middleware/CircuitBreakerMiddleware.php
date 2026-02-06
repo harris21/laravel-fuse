@@ -57,7 +57,8 @@ class CircuitBreakerMiddleware
 
     private function isEnabled(): bool
     {
-        $cacheValue = Cache::get('fuse:enabled');
+        $prefix = config('fuse.cache.prefix', 'fuse');
+        $cacheValue = Cache::get("{$prefix}:enabled");
 
         if ($cacheValue !== null) {
             return (bool) $cacheValue;

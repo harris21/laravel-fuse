@@ -52,4 +52,8 @@ return [
         //     'peak_hours_end' => 17,
         // ],
     ],
+
+    'cache' => [
+        'prefix' => env('FUSE_CACHE_PREFIX', 'fuse')
+    ]
 ];

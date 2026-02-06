@@ -217,6 +217,7 @@ class CircuitBreaker
 
     public function key(string $suffix): string
     {
-        return "fuse:{$this->serviceName}:{$suffix}";
+        $prefix = config('fuse.cache.prefix', 'fuse');
+        return "{$prefix}:{$this->serviceName}:{$suffix}";
     }
 }
