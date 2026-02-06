@@ -33,6 +33,7 @@ When Stripe goes down at 11 PM, your queue workers don't know. They keep trying 
 - **Automatic Recovery** — Circuit tests and heals itself when services return
 - **Per-Service Circuits** — Separate breakers for Stripe, Mailgun, your microservices
 - **Laravel Events** — Get notified on state transitions for alerting and monitoring
+- **Real-Time Status Page** — Built-in monitoring dashboard with live state updates
 - **Pure Laravel** — No external dependencies, uses Cache and native job middleware
 
 ---
@@ -207,6 +208,59 @@ class AlertOnCircuitOpen
 
 **CircuitBreakerClosed:**
 - `$service` — The service name
+
+---
+
+## Status Page
+
+Fuse includes a real-time monitoring dashboard that shows the state of all your circuit breakers.
+
+<p align="center">
+  <img src="art/status-page.png" width="900" alt="Fuse Status Page">
+</p>
+
+### Enable the Status Page
+
+Add to your `.env`:
+
+```env
+FUSE_STATUS_PAGE_ENABLED=true
+```
+
+The status page is available at `/fuse` (configurable via `FUSE_STATUS_PAGE_PREFIX`).
+
+### Authorization
+
+Access is controlled by a `viewFuse` gate. By default, only the `local` environment is allowed. Override it in your `AppServiceProvider`:
+
+```php
+use Illuminate\Support\Facades\Gate;
+
+Gate::define('viewFuse', function ($user = null) {
+    return $user?->isAdmin();
+});
+```
+
+### Configuration
+
+```php
+// config/fuse.php
+
+'status_page' => [
+    'enabled' => env('FUSE_STATUS_PAGE_ENABLED', false),
+    'prefix' => env('FUSE_STATUS_PAGE_PREFIX', 'fuse'),
+    'middleware' => [],          // Custom middleware (replaces default)
+    'polling_interval' => 2,    // Frontend refresh interval in seconds
+],
+```
+
+### What It Shows
+
+- **Circuit state** for each configured service (CLOSED, OPEN, HALF-OPEN)
+- **State history** with timestamped transitions
+- **Live stats** — attempts, failures, failure rate per window
+- **Recovery info** — when the circuit opened and when it will test recovery
+- **Auto-refresh** — polls the backend every 2 seconds (configurable)
 
 ---
 
