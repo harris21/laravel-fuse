@@ -200,6 +200,19 @@ it('maintains separate state for different services', function () {
     expect($mailgun->getStats()['failures'])->toBe(0);
 });
 
+it('uses custom cache prefix in keys', function () {
+    config(['fuse.cache.prefix' => 'my-app']);
+
+    $breaker = new CircuitBreaker('test-service');
+
+    expect($breaker->key('state'))->toBe('my-app:test-service:state');
+    expect($breaker->key('opened_at'))->toBe('my-app:test-service:opened_at');
+
+    $breaker->recordFailure();
+
+    expect(Cache::get('my-app:test-service:state') ?? 'closed')->toBe('closed');
+});
+
 it('uses peak hours threshold during peak hours via ThresholdCalculator', function () {
     Carbon::setTestNow(Carbon::createFromTime(12, 0, 0));
 

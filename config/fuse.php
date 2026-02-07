@@ -55,6 +55,20 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Cache Configuration
+    |--------------------------------------------------------------------------
+    |
+    | Configure the cache key prefix used for storing circuit breaker state.
+    | This is useful when running multiple applications on the same cache
+    | store to avoid key collisions.
+    |
+    */
+    'cache' => [
+        'prefix' => env('FUSE_CACHE_PREFIX', 'fuse'),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Status Page
     |--------------------------------------------------------------------------
     |

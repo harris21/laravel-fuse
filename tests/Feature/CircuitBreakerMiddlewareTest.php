@@ -40,7 +40,8 @@ it('passes through when fuse is disabled via config', function () {
 
 it('passes through when fuse is disabled via cache', function () {
     config(['fuse.enabled' => true]);
-    Cache::put('fuse:enabled', false);
+    $prefix = config('fuse.cache.prefix');
+    Cache::put("{$prefix}:enabled", false);
 
     $middleware = new CircuitBreakerMiddleware('test-service');
     $job = new class
@@ -156,7 +157,8 @@ it('records failure and rethrows exception on failed job', function () {
 
 it('cache override takes precedence over config for enabled state', function () {
     config(['fuse.enabled' => false]);
-    Cache::put('fuse:enabled', true);
+    $prefix = config('fuse.cache.prefix');
+    Cache::put("{$prefix}:enabled", true);
 
     $breaker = new CircuitBreaker('test-service');
     for ($i = 0; $i < 5; $i++) {
@@ -261,8 +263,8 @@ it('releases non-probe workers in half-open state', function () {
     sleep(2);
     $breaker->isOpen();
     expect($breaker->isHalfOpen())->toBeTrue();
-
-    $probeLock = Cache::lock('fuse:test-service:probe', 5);
+    $prefix = config('fuse.cache.prefix');
+    $probeLock = Cache::lock("{$prefix}:test-service:probe", 5);
     expect($probeLock->get())->toBeTrue();
 
     $middleware = new CircuitBreakerMiddleware('test-service');

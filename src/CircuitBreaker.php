@@ -19,6 +19,8 @@ class CircuitBreaker
 
     private readonly int $minRequests;
 
+    private readonly string $cachePrefix;
+
     public function __construct(private readonly string $serviceName)
     {
         $config = config("fuse.services.{$serviceName}", []);
@@ -30,6 +32,8 @@ class CircuitBreaker
 
         $this->minRequests = $config['min_requests']
             ?? config('fuse.default_min_requests', 10);
+
+        $this->cachePrefix = config('fuse.cache.prefix', 'fuse');
     }
 
     public function isOpen(): bool
@@ -217,6 +221,6 @@ class CircuitBreaker
 
     public function key(string $suffix): string
     {
-        return "fuse:{$this->serviceName}:{$suffix}";
+        return "{$this->cachePrefix}:{$this->serviceName}:{$suffix}";
     }
 }
