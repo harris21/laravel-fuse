@@ -16,8 +16,10 @@ it('passes through when fuse is disabled via config', function () {
     config(['fuse.enabled' => false]);
 
     $middleware = new CircuitBreakerMiddleware('test-service');
-    $job = new class {
+    $job = new class
+    {
         public bool $handled = false;
+
         public bool $released = false;
 
         public function release(int $delay): void
@@ -42,7 +44,8 @@ it('passes through when fuse is disabled via cache', function () {
     Cache::put("{$prefix}:enabled", false);
 
     $middleware = new CircuitBreakerMiddleware('test-service');
-    $job = new class {
+    $job = new class
+    {
         public bool $handled = false;
 
         public function release(int $delay): void {}
@@ -59,7 +62,8 @@ it('passes through when fuse is disabled via cache', function () {
 
 it('executes job when circuit is closed', function () {
     $middleware = new CircuitBreakerMiddleware('test-service');
-    $job = new class {
+    $job = new class
+    {
         public bool $handled = false;
 
         public function release(int $delay): void {}
@@ -84,9 +88,12 @@ it('releases job when circuit is open', function () {
     expect($breaker->isOpen())->toBeTrue();
 
     $middleware = new CircuitBreakerMiddleware('test-service');
-    $job = new class {
+    $job = new class
+    {
         public bool $handled = false;
+
         public bool $released = false;
+
         public int $releaseDelay = 0;
 
         public function release(int $delay): string
@@ -112,7 +119,8 @@ it('releases job when circuit is open', function () {
 
 it('records success on successful job execution', function () {
     $middleware = new CircuitBreakerMiddleware('test-service');
-    $job = new class {
+    $job = new class
+    {
         public function release(int $delay): void {}
     };
 
@@ -129,7 +137,8 @@ it('records success on successful job execution', function () {
 
 it('records failure and rethrows exception on failed job', function () {
     $middleware = new CircuitBreakerMiddleware('test-service');
-    $job = new class {
+    $job = new class
+    {
         public function release(int $delay): void {}
     };
 
@@ -157,8 +166,10 @@ it('cache override takes precedence over config for enabled state', function () 
     }
 
     $middleware = new CircuitBreakerMiddleware('test-service');
-    $job = new class {
+    $job = new class
+    {
         public bool $handled = false;
+
         public bool $released = false;
 
         public function release(int $delay): void
@@ -193,7 +204,8 @@ it('executes probe and closes circuit on success in half-open state', function (
     expect($breaker->isHalfOpen())->toBeTrue();
 
     $middleware = new CircuitBreakerMiddleware('test-service');
-    $job = new class {
+    $job = new class
+    {
         public bool $handled = false;
 
         public function release(int $delay): void {}
@@ -224,7 +236,8 @@ it('reopens circuit on failure in half-open state', function () {
     expect($breaker->isHalfOpen())->toBeTrue();
 
     $middleware = new CircuitBreakerMiddleware('test-service');
-    $job = new class {
+    $job = new class
+    {
         public function release(int $delay): void {}
     };
 
@@ -255,9 +268,12 @@ it('releases non-probe workers in half-open state', function () {
     expect($probeLock->get())->toBeTrue();
 
     $middleware = new CircuitBreakerMiddleware('test-service');
-    $job = new class {
+    $job = new class
+    {
         public bool $handled = false;
+
         public bool $released = false;
+
         public int $releaseDelay = 0;
 
         public function release(int $delay): string

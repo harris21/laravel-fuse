@@ -23,7 +23,7 @@ it('does not count 429 TooManyRequestsHttpException as failure', function () {
     $breaker = new CircuitBreaker('test-service');
 
     for ($i = 0; $i < 5; $i++) {
-        $breaker->recordFailure(new TooManyRequestsHttpException());
+        $breaker->recordFailure(new TooManyRequestsHttpException);
     }
 
     expect($breaker->isClosed())->toBeTrue();
