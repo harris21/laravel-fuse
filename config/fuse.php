@@ -64,8 +64,9 @@ return [
     |
     */
     'cache' => [
-        'prefix' => env('FUSE_CACHE_PREFIX', 'fuse')
-    ]
+        'prefix' => env('FUSE_CACHE_PREFIX', 'fuse'),
+    ],
+
     /*
     |--------------------------------------------------------------------------
     | Status Page
