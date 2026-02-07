@@ -124,6 +124,11 @@ return [
             'min_requests' => 10,
         ],
     ],
+
+    // Cache prefix — change if multiple apps share the same Redis instance
+    'cache' => [
+        'prefix' => env('FUSE_CACHE_PREFIX', 'fuse'),
+    ],
 ];
 ```
 
