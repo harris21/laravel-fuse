@@ -40,6 +40,7 @@ return [
     | - peak_hours_threshold: Alternative threshold during peak hours (optional)
     | - peak_hours_start: Hour (0-23) when peak hours begin (optional)
     | - peak_hours_end: Hour (0-23) when peak hours end (optional)
+    | - failure_classifier: Custom FailureClassifier class for this service (optional)
     |
     */
     'services' => [
@@ -50,6 +51,7 @@ return [
         //     'peak_hours_threshold' => 60,
         //     'peak_hours_start' => 9,
         //     'peak_hours_end' => 17,
+        //     'failure_classifier' => \App\Fuse\StripeFailureClassifier::class,
         // ],
     ],
 
