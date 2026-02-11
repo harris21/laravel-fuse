@@ -2,13 +2,14 @@
 
 namespace Harris21\Fuse;
 
-use GuzzleHttp\Exception\ClientException;
+use Harris21\Fuse\Classifiers\DefaultFailureClassifier;
+use Harris21\Fuse\Contracts\FailureClassifier;
 use Harris21\Fuse\Enums\CircuitState;
 use Harris21\Fuse\Events\CircuitBreakerClosed;
 use Harris21\Fuse\Events\CircuitBreakerHalfOpen;
 use Harris21\Fuse\Events\CircuitBreakerOpened;
 use Illuminate\Support\Facades\Cache;
-use Symfony\Component\HttpKernel\Exception\TooManyRequestsHttpException;
+use InvalidArgumentException;
 use Throwable;
 
 class CircuitBreaker
@@ -20,6 +21,8 @@ class CircuitBreaker
     private readonly int $minRequests;
 
     private readonly string $cachePrefix;
+
+    private readonly FailureClassifier $failureClassifier;
 
     public function __construct(private readonly string $serviceName)
     {
@@ -34,6 +37,8 @@ class CircuitBreaker
             ?? config('fuse.default_min_requests', 10);
 
         $this->cachePrefix = config('fuse.cache.prefix', 'fuse');
+
+        $this->failureClassifier = $this->resolveFailureClassifier($config);
     }
 
     public function isOpen(): bool
@@ -76,7 +81,7 @@ class CircuitBreaker
 
     public function recordFailure(?Throwable $exception = null): void
     {
-        if ($exception !== null && ! $this->shouldCountFailure($exception)) {
+        if ($exception !== null && ! $this->failureClassifier->shouldCount($exception)) {
             $this->incrementAttempts();
 
             return;
@@ -106,20 +111,21 @@ class CircuitBreaker
         }
     }
 
-    private function shouldCountFailure(Throwable $e): bool
+    private function resolveFailureClassifier(array $config): FailureClassifier
     {
-        if ($e instanceof TooManyRequestsHttpException) {
-            return false;
+        if (! isset($config['failure_classifier'])) {
+            return new DefaultFailureClassifier;
         }
 
-        if ($e instanceof ClientException) {
-            return match ($e->getResponse()?->getStatusCode()) {
-                429, 401, 403 => false,
-                default => true,
-            };
+        $classifier = app($config['failure_classifier']);
+
+        if (! $classifier instanceof FailureClassifier) {
+            throw new InvalidArgumentException(
+                "Class [{$config['failure_classifier']}] must implement ".FailureClassifier::class
+            );
         }
 
-        return true;
+        return $classifier;
     }
 
     public function getState(): CircuitState

@@ -170,6 +170,77 @@ This prevents false positives. A rate limit doesn't mean Stripe is down - it mea
 
 ---
 
+## Custom Failure Classification
+
+The default behavior works well for most APIs, but some services deviate from HTTP standards. For example, Stripe returns `500` for idempotency errors that are actually client-side issues — not outages.
+
+You can override the failure classification logic per service by setting the `failure_classifier` option in your service config:
+
+```php
+// config/fuse.php
+
+'services' => [
+    'stripe' => [
+        'threshold' => 50,
+        'timeout' => 30,
+        'min_requests' => 5,
+        'failure_classifier' => \App\Fuse\StripeFailureClassifier::class,
+    ],
+],
+```
+
+### Extending the Default Classifier
+
+The easiest approach is to extend `DefaultFailureClassifier` and override specific cases:
+
+```php
+namespace App\Fuse;
+
+use GuzzleHttp\Exception\ServerException;
+use Harris21\Fuse\Classifiers\DefaultFailureClassifier;
+use Throwable;
+
+class StripeFailureClassifier extends DefaultFailureClassifier
+{
+    public function shouldCount(Throwable $e): bool
+    {
+        // Stripe returns 500 for idempotency errors — not a real outage
+        if ($e instanceof ServerException) {
+            $body = (string) $e->getResponse()?->getBody();
+
+            if (str_contains($body, 'idempotency')) {
+                return false;
+            }
+        }
+
+        return parent::shouldCount($e);
+    }
+}
+```
+
+### Implementing the Interface from Scratch
+
+For full control, implement `FailureClassifier` directly:
+
+```php
+namespace App\Fuse;
+
+use Harris21\Fuse\Contracts\FailureClassifier;
+use Throwable;
+
+class CustomFailureClassifier implements FailureClassifier
+{
+    public function shouldCount(Throwable $e): bool
+    {
+        // Your classification logic
+    }
+}
+```
+
+When no `failure_classifier` is configured, Fuse uses `DefaultFailureClassifier` which preserves the behavior described in the table above.
+
+---
+
 ## Events
 
 Fuse dispatches Laravel events on every state transition:
