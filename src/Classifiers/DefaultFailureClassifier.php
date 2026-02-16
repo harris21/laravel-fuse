@@ -4,6 +4,7 @@ namespace Harris21\Fuse\Classifiers;
 
 use GuzzleHttp\Exception\ClientException;
 use Harris21\Fuse\Contracts\FailureClassifier;
+use Illuminate\Http\Client\RequestException;
 use Symfony\Component\HttpKernel\Exception\TooManyRequestsHttpException;
 use Throwable;
 
@@ -21,6 +22,13 @@ class DefaultFailureClassifier implements FailureClassifier
         if ($e instanceof ClientException) {
             return match (true) {
                 in_array($e->getResponse()?->getStatusCode(), self::EXCLUDED_STATUS_CODES, true) => false,
+                default => true,
+            };
+        }
+
+        if ($e instanceof RequestException) {
+            return match (true) {
+                in_array($e->response?->status(), self::EXCLUDED_STATUS_CODES, true) => false,
                 default => true,
             };
         }
