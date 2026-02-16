@@ -9,6 +9,8 @@ use Harris21\Fuse\CircuitBreaker;
 use Harris21\Fuse\Classifiers\DefaultFailureClassifier;
 use Harris21\Fuse\Contracts\FailureClassifier;
 use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Http\Client\RequestException;
+use Illuminate\Http\Client\Response as LaravelResponse;
 use Illuminate\Support\Facades\Cache;
 use Symfony\Component\HttpKernel\Exception\TooManyRequestsHttpException;
 
@@ -69,6 +71,51 @@ it('does not count 403 auth errors as failure', function () {
     $request = new Request('GET', 'https://api.stripe.com');
     $response = new Response(403);
     $exception = new ClientException('Forbidden', $request, $response);
+
+    for ($i = 0; $i < 5; $i++) {
+        $breaker->recordFailure($exception);
+    }
+
+    expect($breaker->isClosed())->toBeTrue();
+    expect($breaker->getStats()['failures'])->toBe(0);
+});
+
+it('does not count 429 Laravel RequestException as failure', function () {
+    $breaker = new CircuitBreaker('test-service');
+
+    $psrResponse = new Response(429);
+    $laravelResponse = new LaravelResponse($psrResponse);
+    $exception = new RequestException($laravelResponse);
+
+    for ($i = 0; $i < 5; $i++) {
+        $breaker->recordFailure($exception);
+    }
+
+    expect($breaker->isClosed())->toBeTrue();
+    expect($breaker->getStats()['failures'])->toBe(0);
+});
+
+it('does not count 401 Laravel RequestException as failure', function () {
+    $breaker = new CircuitBreaker('test-service');
+
+    $psrResponse = new Response(401);
+    $laravelResponse = new LaravelResponse($psrResponse);
+    $exception = new RequestException($laravelResponse);
+
+    for ($i = 0; $i < 5; $i++) {
+        $breaker->recordFailure($exception);
+    }
+
+    expect($breaker->isClosed())->toBeTrue();
+    expect($breaker->getStats()['failures'])->toBe(0);
+});
+
+it('does not count 403 Laravel RequestException as failure', function () {
+    $breaker = new CircuitBreaker('test-service');
+
+    $psrResponse = new Response(403);
+    $laravelResponse = new LaravelResponse($psrResponse);
+    $exception = new RequestException($laravelResponse);
 
     for ($i = 0; $i < 5; $i++) {
         $breaker->recordFailure($exception);
@@ -174,6 +221,51 @@ it('counts 400 bad request errors as failures', function () {
     $request = new Request('POST', 'https://api.example.com/endpoint');
     $response = new Response(400);
     $exception = new ClientException('Bad Request', $request, $response);
+
+    for ($i = 0; $i < 5; $i++) {
+        $breaker->recordFailure($exception);
+    }
+
+    expect($breaker->isOpen())->toBeTrue();
+    expect($breaker->getStats()['failures'])->toBe(5);
+});
+
+it('counts 404 Laravel RequestException as failure', function () {
+    $breaker = new CircuitBreaker('test-service');
+
+    $psrResponse = new Response(404);
+    $laravelResponse = new LaravelResponse($psrResponse);
+    $exception = new RequestException($laravelResponse);
+
+    for ($i = 0; $i < 5; $i++) {
+        $breaker->recordFailure($exception);
+    }
+
+    expect($breaker->isOpen())->toBeTrue();
+    expect($breaker->getStats()['failures'])->toBe(5);
+});
+
+it('counts 400 Laravel RequestException as failure', function () {
+    $breaker = new CircuitBreaker('test-service');
+
+    $psrResponse = new Response(400);
+    $laravelResponse = new LaravelResponse($psrResponse);
+    $exception = new RequestException($laravelResponse);
+
+    for ($i = 0; $i < 5; $i++) {
+        $breaker->recordFailure($exception);
+    }
+
+    expect($breaker->isOpen())->toBeTrue();
+    expect($breaker->getStats()['failures'])->toBe(5);
+});
+
+it('counts 500 Laravel RequestException as failure', function () {
+    $breaker = new CircuitBreaker('test-service');
+
+    $psrResponse = new Response(500);
+    $laravelResponse = new LaravelResponse($psrResponse);
+    $exception = new RequestException($laravelResponse);
 
     for ($i = 0; $i < 5; $i++) {
         $breaker->recordFailure($exception);
