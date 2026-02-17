@@ -9,6 +9,8 @@ use Harris21\Fuse\CircuitBreaker;
 use Harris21\Fuse\Classifiers\DefaultFailureClassifier;
 use Harris21\Fuse\Contracts\FailureClassifier;
 use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Http\Client\RequestException;
+use Illuminate\Http\Client\Response as LaravelResponse;
 use Illuminate\Support\Facades\Cache;
 use Symfony\Component\HttpKernel\Exception\TooManyRequestsHttpException;
 
@@ -77,6 +79,25 @@ it('does not count 403 auth errors as failure', function () {
     expect($breaker->isClosed())->toBeTrue();
     expect($breaker->getStats()['failures'])->toBe(0);
 });
+
+it('does not count Laravel RequestException as failure', function (int $statusCode) {
+    $breaker = new CircuitBreaker('test-service');
+
+    $psrResponse = new Response($statusCode);
+    $laravelResponse = new LaravelResponse($psrResponse);
+    $exception = new RequestException($laravelResponse);
+
+    for ($i = 0; $i < 5; $i++) {
+        $breaker->recordFailure($exception);
+    }
+
+    expect($breaker->isClosed())->toBeTrue();
+    expect($breaker->getStats()['failures'])->toBe(0);
+})->with([
+    '429' => [429],
+    '401' => [401],
+    '403' => [403],
+]);
 
 it('counts 500 server errors as failures', function () {
     $breaker = new CircuitBreaker('test-service');
@@ -182,6 +203,25 @@ it('counts 400 bad request errors as failures', function () {
     expect($breaker->isOpen())->toBeTrue();
     expect($breaker->getStats()['failures'])->toBe(5);
 });
+
+it('counts Laravel RequestException as failure', function (int $statusCode) {
+    $breaker = new CircuitBreaker('test-service');
+
+    $psrResponse = new Response($statusCode);
+    $laravelResponse = new LaravelResponse($psrResponse);
+    $exception = new RequestException($laravelResponse);
+
+    for ($i = 0; $i < 5; $i++) {
+        $breaker->recordFailure($exception);
+    }
+
+    expect($breaker->isOpen())->toBeTrue();
+    expect($breaker->getStats()['failures'])->toBe(5);
+})->with([
+    '404' => [404],
+    '400' => [400],
+    '500' => [500],
+]);
 
 it('uses custom failure classifier from config', function () {
     // Classifier that counts everything, overriding default exclusions
