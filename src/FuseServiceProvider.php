@@ -21,7 +21,7 @@ class FuseServiceProvider extends PackageServiceProvider
             ->hasCommands([
                 FuseStatusCommand::class,
                 FuseResetCommand::class,
-                FuseOpenCommand::class
+                FuseOpenCommand::class,
             ]);
     }
 

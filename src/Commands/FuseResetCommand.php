@@ -11,7 +11,8 @@ class FuseResetCommand extends Command
 
     protected $description = 'Reset circuit breakers to closed state';
 
-    public function handle(): int {
+    public function handle(): int
+    {
         $service = $this->argument('service');
 
         $breaker = new CircuitBreaker($service);

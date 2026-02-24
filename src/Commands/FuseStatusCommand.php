@@ -8,6 +8,7 @@ use Illuminate\Console\Command;
 class FuseStatusCommand extends Command
 {
     protected $signature = 'fuse:status {service?}';
+
     protected $description = 'Display the status of circuit breakers';
 
     public function handle(): int
@@ -18,6 +19,7 @@ class FuseStatusCommand extends Command
 
         if (empty($services)) {
             $this->warn('No services configured in config/fuse.php');
+
             return self::SUCCESS;
         }
 
@@ -26,19 +28,19 @@ class FuseStatusCommand extends Command
             $breaker = new CircuitBreaker($service);
             $stats = $breaker->getStats();
 
-            $state = match(true) {
-                $breaker->isOpen()     => '<fg=red>OPEN</>',
+            $state = match (true) {
+                $breaker->isOpen() => '<fg=red>OPEN</>',
                 $breaker->isHalfOpen() => '<fg=yellow>HALF-OPEN</>',
-                default                => '<fg=green>CLOSED</>',
+                default => '<fg=green>CLOSED</>',
             };
 
             $rows[] = [
                 $service,
                 $state,
-                number_format($stats['failure_rate'], 1) . '%',
+                number_format($stats['failure_rate'], 1).'%',
                 $stats['attempts'],
                 $stats['failures'],
-                $stats['threshold'] . '%',
+                $stats['threshold'].'%',
             ];
         }
 
