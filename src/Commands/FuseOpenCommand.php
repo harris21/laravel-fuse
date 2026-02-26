@@ -2,24 +2,22 @@
 
 namespace Harris21\Fuse\Commands;
 
+use Harris21\Fuse\CircuitBreaker;
 use Illuminate\Console\Command;
-use Illuminate\Support\Facades\Cache;
 
 class FuseOpenCommand extends Command
 {
-    protected $signature = 'fuse:open {service?} {--duration=300 : Duration in seconds to keep circuit open}';
+    protected $signature = 'fuse:open {service}';
 
-    protected $description = 'Open circuit breaker';
+    protected $description = 'Manually open circuit breaker';
 
     public function handle(): int
     {
         $service = $this->argument('service');
 
-        $duration = (int) $this->option('duration');
+        (new CircuitBreaker($service))->forceOpen();
 
-        Cache::put("fuse:{$service}:open", true, $duration);
-
-        $this->info("Circuit breaker for {$service} opened for {$duration} seconds");
+        $this->info("Circuit breaker for {$service} has been manually opened.");
 
         return self::SUCCESS;
     }

@@ -13,12 +13,21 @@ class FuseResetCommand extends Command
 
     public function handle(): int
     {
-        $service = $this->argument('service');
+        $services = $this->argument('service')
+            ? [$this->argument('service')]
+            : array_keys(config('fuse.services', []));
 
-        $breaker = new CircuitBreaker($service);
-        $breaker->reset();
+        if (empty($services)) {
+            $this->warn('No services configured in config/fuse.php');
 
-        $this->info("Circuit breaker {$service} reset to closed state");
+            return self::SUCCESS;
+        }
+
+        foreach ($services as $service) {
+            (new CircuitBreaker($service))->reset();
+
+            $this->info("Circuit breaker {$service} has been reset to closed state");
+        }
 
         return self::SUCCESS;
     }

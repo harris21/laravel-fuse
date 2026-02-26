@@ -2,6 +2,7 @@
 
 namespace Harris21\Fuse;
 
+use Harris21\Fuse\Commands\FuseCloseCommand;
 use Harris21\Fuse\Commands\FuseOpenCommand;
 use Harris21\Fuse\Commands\FuseResetCommand;
 use Harris21\Fuse\Commands\FuseStatusCommand;
@@ -22,6 +23,7 @@ class FuseServiceProvider extends PackageServiceProvider
                 FuseStatusCommand::class,
                 FuseResetCommand::class,
                 FuseOpenCommand::class,
+                FuseCloseCommand::class,
             ]);
     }
 
