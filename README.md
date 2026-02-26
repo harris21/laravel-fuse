@@ -29,7 +29,7 @@ When Stripe goes down at 11 PM, your queue workers don't know. They keep trying 
 - **Peak Hours Support** — Different thresholds for business hours vs. off-peak
 - **Fixed Window Tracking** — Minute-based buckets with automatic expiration, no cleanup needed
 - **Thundering Herd Prevention** — `Cache::lock()` ensures only one worker probes during recovery
-- **Zero Data Loss** — Open circuits delay jobs with `release()`, so work is retried instead of dropped
+- **Zero Data Loss** — Jobs are delayed with `release()`, not failed permanently
 - **Automatic Recovery** — Circuit tests and heals itself when services return
 - **Per-Service Circuits** — Separate breakers for Stripe, Mailgun, your microservices
 - **Laravel Events** — Get notified on state transitions for alerting and monitoring
@@ -46,7 +46,7 @@ When Stripe goes down at 11 PM, your queue workers don't know. They keep trying 
 
 **CLOSED** — Normal operations. All requests pass through. Failures are tracked in the background.
 
-**OPEN** — Protection mode. After the failure threshold is exceeded, the circuit trips. Jobs are released immediately (1ms, not 30s) for delayed retry. No API calls are made.
+**OPEN** — Protection mode. After the failure threshold is exceeded, the circuit trips. Jobs fail instantly (1ms, not 30s) and are delayed for automatic retry. No API calls are made.
 
 **HALF-OPEN** — Testing recovery. After the timeout period, one probe request tests if the service recovered. Success closes the circuit. Failure reopens it.
 
