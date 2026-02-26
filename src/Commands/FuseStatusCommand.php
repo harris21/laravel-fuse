@@ -13,15 +13,17 @@ class FuseStatusCommand extends Command
 
     public function handle(): int
     {
-        $services = $this->argument('service')
-            ? [$this->argument('service')]
-            : array_keys(config('fuse.services', []));
+        $service = $this->argument('service');
 
-        if ($this->argument('service') && ! array_key_exists($this->argument('service'), config('fuse.services', []))) {
-            $this->warn("Service '{$this->argument('service')}' is not configured in config/fuse.php");
+        if ($service && ! array_key_exists($service, config('fuse.services', []))) {
+            $this->warn("Service '{$service}' is not configured in config/fuse.php");
 
             return self::SUCCESS;
         }
+
+        $services = $service
+            ? [$service]
+            : array_keys(config('fuse.services', []));
 
         if (empty($services)) {
             $this->warn('No services configured in config/fuse.php');

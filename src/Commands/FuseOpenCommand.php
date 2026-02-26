@@ -15,7 +15,7 @@ class FuseOpenCommand extends Command
     {
         $service = $this->argument('service');
 
-        if ($service && ! array_key_exists($service, config('fuse.services', []))) {
+        if (! array_key_exists($service, config('fuse.services', []))) {
             $this->warn("Service '{$service}' is not configured in config/fuse.php");
 
             return self::SUCCESS;
