@@ -29,7 +29,7 @@ When Stripe goes down at 11 PM, your queue workers don't know. They keep trying 
 - **Peak Hours Support** — Different thresholds for business hours vs. off-peak
 - **Fixed Window Tracking** — Minute-based buckets with automatic expiration, no cleanup needed
 - **Thundering Herd Prevention** — `Cache::lock()` ensures only one worker probes during recovery
-- **Zero Data Loss** — Jobs are delayed with `release()`, not failed permanently
+- **Zero Data Loss** — Open circuits delay jobs with `release()`, so work is retried instead of dropped
 - **Automatic Recovery** — Circuit tests and heals itself when services return
 - **Per-Service Circuits** — Separate breakers for Stripe, Mailgun, your microservices
 - **Laravel Events** — Get notified on state transitions for alerting and monitoring
@@ -46,7 +46,7 @@ When Stripe goes down at 11 PM, your queue workers don't know. They keep trying 
 
 **CLOSED** — Normal operations. All requests pass through. Failures are tracked in the background.
 
-**OPEN** — Protection mode. After the failure threshold is exceeded, the circuit trips. Jobs fail instantly (1ms, not 30s) and are delayed for automatic retry. No API calls are made.
+**OPEN** — Protection mode. After the failure threshold is exceeded, the circuit trips. Jobs are released immediately (1ms, not 30s) for delayed retry. No API calls are made.
 
 **HALF-OPEN** — Testing recovery. After the timeout period, one probe request tests if the service recovered. Success closes the circuit. Failure reopens it.
 
@@ -337,6 +337,46 @@ Gate::define('viewFuse', function ($user = null) {
 - **Live stats** — attempts, failures, failure rate per window
 - **Recovery info** — when the circuit opened and when it will test recovery
 - **Auto-refresh** — polls the backend every 2 seconds (configurable)
+
+---
+
+## Artisan Commands
+
+Fuse includes CLI commands for inspecting and manually controlling circuit breakers.
+
+### Check circuit status
+
+```bash
+php artisan fuse:status           # all services
+php artisan fuse:status stripe    # single service
+```
+
+Outputs a table with the current state, failure rate, request counts, and threshold for each circuit.
+
+### Reset a circuit
+
+```bash
+php artisan fuse:reset            # all services
+php artisan fuse:reset stripe     # single service
+```
+
+Resets the circuit to CLOSED state and clears all stats for the current window.
+
+### Manually open a circuit
+
+```bash
+php artisan fuse:open stripe
+```
+
+Forces the circuit OPEN immediately. Useful when you know a service is down and want to protect your queue before failures accumulate. The circuit will recover automatically after the configured `timeout`.
+
+### Manually close a circuit
+
+```bash
+php artisan fuse:close stripe
+```
+
+Forces the circuit CLOSED immediately. Useful when a service has recovered but the circuit hasn't timed out yet.
 
 ---
 
