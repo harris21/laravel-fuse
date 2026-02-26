@@ -340,6 +340,46 @@ Gate::define('viewFuse', function ($user = null) {
 
 ---
 
+## Artisan Commands
+
+Fuse includes CLI commands for inspecting and manually controlling circuit breakers.
+
+### Check circuit status
+
+```bash
+php artisan fuse:status           # all services
+php artisan fuse:status stripe    # single service
+```
+
+Outputs a table with the current state, failure rate, request counts, and threshold for each circuit.
+
+### Reset a circuit
+
+```bash
+php artisan fuse:reset            # all services
+php artisan fuse:reset stripe     # single service
+```
+
+Resets the circuit to CLOSED state and clears all stats for the current window.
+
+### Manually open a circuit
+
+```bash
+php artisan fuse:open stripe
+```
+
+Forces the circuit OPEN immediately. Useful when you know a service is down and want to protect your queue before failures accumulate. The circuit will recover automatically after the configured `timeout`.
+
+### Manually close a circuit
+
+```bash
+php artisan fuse:close stripe
+```
+
+Forces the circuit CLOSED immediately. Useful when a service has recovered but the circuit hasn't timed out yet.
+
+---
+
 ## Fallback Strategies
 
 When the circuit opens, your application needs a plan. Here are common strategies:

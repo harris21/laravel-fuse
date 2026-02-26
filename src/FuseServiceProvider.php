@@ -2,6 +2,10 @@
 
 namespace Harris21\Fuse;
 
+use Harris21\Fuse\Commands\FuseCloseCommand;
+use Harris21\Fuse\Commands\FuseOpenCommand;
+use Harris21\Fuse\Commands\FuseResetCommand;
+use Harris21\Fuse\Commands\FuseStatusCommand;
 use Illuminate\Contracts\Auth\Access\Gate as GateContract;
 use Spatie\LaravelPackageTools\Package;
 use Spatie\LaravelPackageTools\PackageServiceProvider;
@@ -14,7 +18,13 @@ class FuseServiceProvider extends PackageServiceProvider
             ->name('fuse')
             ->hasConfigFile()
             ->hasViews()
-            ->hasRoute('web');
+            ->hasRoute('web')
+            ->hasCommands([
+                FuseStatusCommand::class,
+                FuseResetCommand::class,
+                FuseOpenCommand::class,
+                FuseCloseCommand::class,
+            ]);
     }
 
     public function packageBooted(): void

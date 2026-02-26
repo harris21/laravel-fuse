@@ -171,6 +171,22 @@ class CircuitBreaker
         Cache::lock($this->key('transition'))->forceRelease();
     }
 
+    public function forceOpen(): void
+    {
+        Cache::put($this->key('state'), CircuitState::Open->value);
+        Cache::put($this->key('opened_at'), time());
+
+        event(new CircuitBreakerOpened($this->serviceName));
+    }
+
+    public function forceClose(): void
+    {
+        Cache::put($this->key('state'), CircuitState::Closed->value);
+        Cache::forget($this->key('opened_at'));
+
+        event(new CircuitBreakerClosed($this->serviceName));
+    }
+
     private function transitionTo(
         CircuitState $newState,
         float $failureRate = 0,
