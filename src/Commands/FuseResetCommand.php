@@ -17,6 +17,12 @@ class FuseResetCommand extends Command
             ? [$this->argument('service')]
             : array_keys(config('fuse.services', []));
 
+        if ($this->argument('service') && ! array_key_exists($this->argument('service'), config('fuse.services', []))) {
+            $this->warn("Service '{$this->argument('service')}' is not configured in config/fuse.php");
+
+            return self::SUCCESS;
+        }
+
         if (empty($services)) {
             $this->warn('No services configured in config/fuse.php');
 

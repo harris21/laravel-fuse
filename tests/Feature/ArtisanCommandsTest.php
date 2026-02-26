@@ -14,7 +14,7 @@ beforeEach(function () {
     ]]);
 });
 
-it('displays status of all configures services', function () {
+it('displays status of all configured services', function () {
     $this->artisan('fuse:status')
         ->assertExitCode(0);
 });
@@ -29,6 +29,30 @@ it('warns when no services are configured', function () {
 
     $this->artisan('fuse:status')
         ->expectsOutput('No services configured in config/fuse.php')
+        ->assertExitCode(0);
+});
+
+it('warns when service is not configured', function () {
+    $this->artisan('fuse:status unknown-service')
+        ->expectsOutput("Service 'unknown-service' is not configured in config/fuse.php")
+        ->assertExitCode(0);
+});
+
+it('warns when service is not configured in fuse:reset', function () {
+    $this->artisan('fuse:reset unknown-service')
+        ->expectsOutput("Service 'unknown-service' is not configured in config/fuse.php")
+        ->assertExitCode(0);
+});
+
+it('warns when service is not configured in fuse:open', function () {
+    $this->artisan('fuse:open unknown-service')
+        ->expectsOutput("Service 'unknown-service' is not configured in config/fuse.php")
+        ->assertExitCode(0);
+});
+
+it('warns when service is not configured in fuse:close', function () {
+    $this->artisan('fuse:close unknown-service')
+        ->expectsOutput("Service 'unknown-service' is not configured in config/fuse.php")
         ->assertExitCode(0);
 });
 
