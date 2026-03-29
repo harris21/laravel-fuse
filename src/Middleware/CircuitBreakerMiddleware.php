@@ -8,9 +8,19 @@ use Throwable;
 
 class CircuitBreakerMiddleware
 {
+    private readonly int $releaseDelay;
+
     public function __construct(
-        private readonly string $service
-    ) {}
+        private readonly string $service,
+        public readonly ?int $release = null,
+    ) {
+        $config = config("fuse.services.{$this->service}", []);
+
+        $this->releaseDelay = $this->release
+            ?? ($config['release'] ?? null)
+            ?? config('fuse.default_release')
+            ?? 10;
+    }
 
     public function handle(mixed $job, callable $next): mixed
     {
@@ -21,7 +31,7 @@ class CircuitBreakerMiddleware
         $breaker = new CircuitBreaker($this->service);
 
         if ($breaker->isOpen()) {
-            return $job->release(10);
+            return $job->release($this->releaseDelay);
         }
 
         if ($breaker->isHalfOpen()) {
@@ -41,7 +51,7 @@ class CircuitBreakerMiddleware
                 }
             }
 
-            return $job->release(10);
+            return $job->release($this->releaseDelay);
         }
 
         try {

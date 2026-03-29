@@ -10,6 +10,7 @@ beforeEach(function () {
     config(['fuse.default_threshold' => 50]);
     config(['fuse.default_timeout' => 60]);
     config(['fuse.default_min_requests' => 5]);
+    config(['fuse.default_release' => 10]);
 });
 
 it('passes through when fuse is disabled via config', function () {
@@ -36,6 +37,126 @@ it('passes through when fuse is disabled via config', function () {
 
     expect($job->handled)->toBeTrue();
     expect($job->released)->toBeFalse();
+});
+
+it('uses the explicit middleware release over config values', function () {
+    config([
+        'fuse.default_release' => 10,
+        'fuse.services.test-service.release' => 15,
+    ]);
+
+    $breaker = new CircuitBreaker('test-service');
+    for ($i = 0; $i < 5; $i++) {
+        $breaker->recordFailure();
+    }
+
+    $middleware = new CircuitBreakerMiddleware('test-service', release: 20);
+    $job = new class
+    {
+        public int $releaseDelay = 0;
+
+        public function release(int $delay): string
+        {
+            $this->releaseDelay = $delay;
+
+            return 'released';
+        }
+    };
+
+    $result = $middleware->handle($job, fn () => 'success');
+
+    expect($job->releaseDelay)->toBe(20);
+    expect($result)->toBe('released');
+});
+
+it('uses the per-service release when the middleware release is not provided', function () {
+    config([
+        'fuse.default_release' => 10,
+        'fuse.services.test-service.release' => 15,
+    ]);
+
+    $breaker = new CircuitBreaker('test-service');
+    for ($i = 0; $i < 5; $i++) {
+        $breaker->recordFailure();
+    }
+
+    $middleware = new CircuitBreakerMiddleware('test-service');
+    $job = new class
+    {
+        public int $releaseDelay = 0;
+
+        public function release(int $delay): string
+        {
+            $this->releaseDelay = $delay;
+
+            return 'released';
+        }
+    };
+
+    $result = $middleware->handle($job, fn () => 'success');
+
+    expect($job->releaseDelay)->toBe(15);
+    expect($result)->toBe('released');
+});
+
+it('uses the global default release when no explicit or per-service release is provided', function () {
+    config([
+        'fuse.default_release' => 12,
+        'fuse.services.test-service' => [],
+    ]);
+
+    $breaker = new CircuitBreaker('test-service');
+    for ($i = 0; $i < 5; $i++) {
+        $breaker->recordFailure();
+    }
+
+    $middleware = new CircuitBreakerMiddleware('test-service');
+    $job = new class
+    {
+        public int $releaseDelay = 0;
+
+        public function release(int $delay): string
+        {
+            $this->releaseDelay = $delay;
+
+            return 'released';
+        }
+    };
+
+    $result = $middleware->handle($job, fn () => 'success');
+
+    expect($job->releaseDelay)->toBe(12);
+    expect($result)->toBe('released');
+});
+
+it('falls back to 10 seconds when no release is configured anywhere', function () {
+    config([
+        'fuse.default_release' => null,
+        'fuse.services.test-service' => [],
+    ]);
+
+    $breaker = new CircuitBreaker('test-service');
+    for ($i = 0; $i < 5; $i++) {
+        $breaker->recordFailure();
+    }
+
+    $middleware = new CircuitBreakerMiddleware('test-service');
+    $job = new class
+    {
+        public int $releaseDelay = 0;
+
+        public function release(int $delay): string
+        {
+            $this->releaseDelay = $delay;
+
+            return 'released';
+        }
+    };
+
+    $result = $middleware->handle($job, fn () => 'success');
+
+    expect($job->releaseDelay)->toBe(10);
+    expect($result)->toBe('released');
 });
 
 it('passes through when fuse is disabled via cache', function () {
