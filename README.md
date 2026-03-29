@@ -80,7 +80,7 @@ class ChargeCustomer implements ShouldQueue
 
     public function middleware(): array
     {
-        return [new CircuitBreakerMiddleware('stripe')];
+        return [new CircuitBreakerMiddleware('stripe', release: 20)];
     }
 
     public function handle(): void
@@ -112,6 +112,7 @@ return [
             'threshold' => 50,
             'timeout' => 30,
             'min_requests' => 5,
+            'release' => 15,
 
             // Peak hours: more tolerant during business hours
             'peak_hours_threshold' => 60,
