@@ -12,7 +12,7 @@ class CircuitBreakerMiddleware
 
     public function __construct(
         private readonly string $service,
-        public readonly ?int $release = null,
+        private readonly ?int $release = null,
     ) {
         $config = config("fuse.services.{$this->service}", []);
 
