@@ -448,6 +448,8 @@ Built by [Harris Raftopoulos](https://x.com/harrisrafto) for [Laracon India 2026
 
 YouTube: [@harrisrafto](https://youtube.com/@harrisrafto)
 
+Video walkthrough: [Watch on YouTube](https://www.youtube.com/watch?v=w-QKqTPbcqs)
+
 Based on the circuit breaker pattern from Michael Nygard's *Release It!* and popularized by Martin Fowler.
 
 ---
