@@ -2,8 +2,8 @@
 
 use Harris21\Fuse\Attributes\UseCircuitBreaker;
 use Harris21\Fuse\CircuitBreaker;
-use Harris21\Fuse\Middleware\AttributeMiddlewareResolver;
 use Harris21\Fuse\Middleware\CircuitBreakerMiddleware;
+use Harris21\Fuse\Middleware\ResolvesCircuitBreakers;
 use Illuminate\Support\Facades\Cache;
 
 beforeEach(function () {
@@ -23,7 +23,7 @@ it('resolves a single circuit breaker attribute', function () {
         }
     };
 
-    $middleware = AttributeMiddlewareResolver::resolve($job);
+    $middleware = ResolvesCircuitBreakers::resolve($job);
 
     expect($middleware)->toHaveCount(1)
         ->and($middleware[0])->toBeInstanceOf(CircuitBreakerMiddleware::class);
@@ -52,7 +52,7 @@ it('uses the explicit attribute release over config values', function () {
         }
     };
 
-    $middleware = AttributeMiddlewareResolver::resolve($job);
+    $middleware = ResolvesCircuitBreakers::resolve($job);
     $result = $middleware[0]->handle($job, fn () => 'success');
 
     expect($job->releaseDelay)->toBe(20)
@@ -82,7 +82,7 @@ it('uses the per-service release when the attribute release is not provided', fu
         }
     };
 
-    $middleware = AttributeMiddlewareResolver::resolve($job);
+    $middleware = ResolvesCircuitBreakers::resolve($job);
     $result = $middleware[0]->handle($job, fn () => 'success');
 
     expect($job->releaseDelay)->toBe(15)
@@ -112,7 +112,7 @@ it('uses the global default release when no explicit or per-service release is p
         }
     };
 
-    $middleware = AttributeMiddlewareResolver::resolve($job);
+    $middleware = ResolvesCircuitBreakers::resolve($job);
     $result = $middleware[0]->handle($job, fn () => 'success');
 
     expect($job->releaseDelay)->toBe(12)
@@ -142,7 +142,7 @@ it('falls back to 10 seconds when no release is configured anywhere', function (
         }
     };
 
-    $middleware = AttributeMiddlewareResolver::resolve($job);
+    $middleware = ResolvesCircuitBreakers::resolve($job);
     $result = $middleware[0]->handle($job, fn () => 'success');
 
     expect($job->releaseDelay)->toBe(10)
@@ -150,7 +150,7 @@ it('falls back to 10 seconds when no release is configured anywhere', function (
 });
 
 it('returns an empty array when the job has no fuse attributes', function () {
-    $middleware = AttributeMiddlewareResolver::resolve(new class
+    $middleware = ResolvesCircuitBreakers::resolve(new class
     {
         public function release(int $delay): string
         {
@@ -159,6 +159,23 @@ it('returns an empty array when the job has no fuse attributes', function () {
     });
 
     expect($middleware)->toBe([]);
+});
+
+it('resolves repeated circuit breaker attributes in declaration order', function () {
+    $job = new #[UseCircuitBreaker('stripe')]
+    #[UseCircuitBreaker('mailgun', release: 30)] class
+    {
+        public function release(int $delay): string
+        {
+            return (string) $delay;
+        }
+    };
+
+    $middleware = ResolvesCircuitBreakers::resolve($job);
+
+    expect($middleware)->toHaveCount(2)
+        ->and($middleware[0])->toBeInstanceOf(CircuitBreakerMiddleware::class)
+        ->and($middleware[1])->toBeInstanceOf(CircuitBreakerMiddleware::class);
 });
 
 it('prepends attribute middleware before manually supplied middleware', function () {
@@ -178,7 +195,7 @@ it('prepends attribute middleware before manually supplied middleware', function
         }
     };
 
-    $middleware = AttributeMiddlewareResolver::merge($job, [$customMiddleware]);
+    $middleware = ResolvesCircuitBreakers::merge($job, [$customMiddleware]);
 
     expect($middleware)->toHaveCount(2)
         ->and($middleware[0])->toBeInstanceOf(CircuitBreakerMiddleware::class)
