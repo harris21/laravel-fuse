@@ -5,7 +5,7 @@ namespace Harris21\Fuse\Middleware;
 use Harris21\Fuse\Attributes\UseCircuitBreaker;
 use ReflectionClass;
 
-class AttributeMiddlewareResolver
+class ResolvesCircuitBreakers
 {
     public static function resolve(object $job): array
     {

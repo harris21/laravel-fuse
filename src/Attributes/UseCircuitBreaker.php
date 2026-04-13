@@ -4,7 +4,7 @@ namespace Harris21\Fuse\Attributes;
 
 use Attribute;
 
-#[Attribute(Attribute::TARGET_CLASS)]
+#[Attribute(Attribute::TARGET_CLASS | Attribute::IS_REPEATABLE)]
 class UseCircuitBreaker
 {
     public function __construct(
