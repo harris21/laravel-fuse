@@ -95,6 +95,51 @@ That's it. Your job is now protected.
 
 ---
 
+## Attributes
+
+Instead of building the middleware array yourself, declare protection with attributes:
+
+```php
+use Harris21\Fuse\Attributes\UseCircuitBreaker;
+use Harris21\Fuse\Middleware\ResolvesCircuitBreakers;
+
+#[UseCircuitBreaker('stripe')]
+class ChargeCustomer implements ShouldQueue
+{
+    public function middleware(): array
+    {
+        return ResolvesCircuitBreakers::resolve($this);
+    }
+}
+```
+
+Jobs that talk to multiple services can stack them:
+
+```php
+#[UseCircuitBreaker('stripe')]
+#[UseCircuitBreaker('mailgun', release: 30)]
+class ChargeAndNotify implements ShouldQueue
+{
+    public function middleware(): array
+    {
+        return ResolvesCircuitBreakers::resolve($this);
+    }
+}
+```
+
+If you have other middleware to include, use `merge()` to prepend the circuit breakers:
+
+```php
+public function middleware(): array
+{
+    return ResolvesCircuitBreakers::merge($this, [
+        new RateLimited('payments'),
+    ]);
+}
+```
+
+---
+
 ## Configuration
 
 ```php
