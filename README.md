@@ -27,7 +27,7 @@ When Stripe goes down at 11 PM, your queue workers don't know. They keep trying 
 - **Three-State Circuit Breaker** — CLOSED (normal), OPEN (protected), HALF-OPEN (testing recovery)
 - **Intelligent Failure Classification** — 429 rate limits and auth errors don't trip the circuit
 - **Peak Hours Support** — Different thresholds for business hours vs. off-peak
-- **Fixed Window Tracking** — Minute-based buckets with automatic expiration, no cleanup needed
+- **Configurable Window Tracking** — Tumbling time buckets (default 60s, tunable per service) with automatic expiration, no cleanup needed
 - **Thundering Herd Prevention** — `Cache::lock()` ensures only one worker probes during recovery
 - **Zero Data Loss** — Jobs are delayed with `release()`, not failed permanently
 - **Automatic Recovery** — Circuit tests and heals itself when services return
@@ -127,6 +127,12 @@ class ChargeAndNotify implements ShouldQueue
 }
 ```
 
+Both `release:` and `window:` can be set per attribute. `window:` overrides the failure-tracking window (in seconds) for that service, taking precedence over config:
+
+```php
+#[UseCircuitBreaker(service: 'reports', window: 600)]
+```
+
 If you have other middleware to include, use `merge()` to prepend the circuit breakers:
 
 ```php
@@ -151,6 +157,7 @@ return [
     'default_threshold' => 50,      // Failure rate percentage to trip circuit
     'default_timeout' => 60,        // Seconds before testing recovery
     'default_min_requests' => 10,   // Minimum requests before evaluating
+    'default_window' => 60,         // Seconds per failure-tracking window
 
     'services' => [
         'stripe' => [
@@ -168,6 +175,7 @@ return [
             'threshold' => 60,
             'timeout' => 120,
             'min_requests' => 10,
+            'window' => 300,        // 5-minute window for this lower-traffic service
         ],
     ],
 
@@ -194,6 +202,25 @@ Configure different thresholds for business hours when every transaction matters
 ```
 
 During peak hours (9 AM - 5 PM), the circuit uses the higher threshold to maximize successful transactions. Outside peak hours, it uses the lower threshold for earlier protection.
+
+---
+
+## Tracking Window
+
+Failures are counted in fixed time windows (tumbling buckets), and the circuit only evaluates the failure rate once a window has gathered `min_requests` attempts. This matters for low-volume services: if a service doesn't see `min_requests` attempts within a single window, the failure rate is never checked and the circuit can't trip. The default 60-second window fits busy services — quieter ones need a wider window so enough attempts accumulate.
+
+Widen the window so enough samples accumulate before the bucket rolls over:
+
+```php
+'reports' => [
+    'min_requests' => 10,
+    'window' => 600,   // 10 minutes — long enough to gather 10 samples
+],
+```
+
+Set it globally with `default_window`, per-service as above, or inline on the attribute (`#[UseCircuitBreaker(service: 'reports', window: 600)]`). Counters auto-expire after twice the window, so there's still nothing to clean up.
+
+Trade-offs to keep in mind: a longer window reacts more slowly and keeps the circuit eligible to stay open longer, and because buckets are tumbling, a failure burst that straddles a boundary is split across two windows — so worst-case detection can lag by up to one window. If you ever need smoother behaviour, a future weighted "current + previous bucket" counter could remove that boundary effect.
 
 ---
 

@@ -201,3 +201,23 @@ it('prepends attribute middleware before manually supplied middleware', function
         ->and($middleware[0])->toBeInstanceOf(CircuitBreakerMiddleware::class)
         ->and($middleware[1])->toBe($customMiddleware);
 });
+
+it('carries the attribute window through to the resolved middleware', function () {
+    $job = new #[UseCircuitBreaker('stripe', window: 300)] class
+    {
+        public function release(int $delay): string
+        {
+            return (string) $delay;
+        }
+    };
+
+    $attribute = (new ReflectionClass($job))
+        ->getAttributes(UseCircuitBreaker::class)[0]
+        ->newInstance();
+
+    $middleware = ResolvesCircuitBreakers::resolve($job);
+
+    expect($attribute->window)->toBe(300)
+        ->and($middleware)->toHaveCount(1)
+        ->and($middleware[0])->toBeInstanceOf(CircuitBreakerMiddleware::class);
+});

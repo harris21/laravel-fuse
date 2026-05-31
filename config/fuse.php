@@ -17,8 +17,8 @@ return [
     | Default Settings
     |--------------------------------------------------------------------------
     |
-    | Default threshold, timeout, minimum requests, and release delay for
-    | circuit breakers.
+    | Default threshold, timeout, minimum requests, release delay, and tracking
+    | window for circuit breakers.
     | These can be overridden per-service in the 'services' array below.
     |
     */
@@ -26,6 +26,7 @@ return [
     'default_timeout' => 60,        // Seconds before transitioning to half-open
     'default_min_requests' => 10,   // Minimum requests before evaluating threshold
     'default_release' => 10,        // Seconds to delay a job when the circuit is open
+    'default_window' => 60,         // Seconds per failure-tracking window (tumbling bucket)
 
     /*
     |--------------------------------------------------------------------------
@@ -41,6 +42,7 @@ return [
     | - timeout: Seconds before transitioning to half-open (default: 60)
     | - min_requests: Minimum requests before evaluating threshold (default: 10)
     | - release: Seconds to delay a job when the circuit is open (default: 10)
+    | - window: Seconds per failure-tracking window; raise for low-throughput queues (default: 60)
     | - peak_hours_threshold: Alternative threshold during peak hours (optional)
     | - peak_hours_start: Hour (0-23) when peak hours begin (optional)
     | - peak_hours_end: Hour (0-23) when peak hours end (optional)
@@ -53,6 +55,7 @@ return [
         //     'timeout' => 30,
         //     'min_requests' => 5,
         //     'release' => 10,
+        //     'window' => 300,
         //     'peak_hours_threshold' => 60,
         //     'peak_hours_start' => 9,
         //     'peak_hours_end' => 17,

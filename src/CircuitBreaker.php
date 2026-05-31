@@ -20,11 +20,13 @@ class CircuitBreaker
 
     private readonly int $minRequests;
 
+    private readonly int $windowSeconds;
+
     private readonly string $cachePrefix;
 
     private readonly FailureClassifier $failureClassifier;
 
-    public function __construct(private readonly string $serviceName)
+    public function __construct(private readonly string $serviceName, ?int $window = null)
     {
         $config = config("fuse.services.{$serviceName}", []);
 
@@ -35,6 +37,12 @@ class CircuitBreaker
 
         $this->minRequests = $config['min_requests']
             ?? config('fuse.default_min_requests', 10);
+
+        $this->windowSeconds = max(1, (int) (
+            $window
+            ?? $config['window']
+            ?? config('fuse.default_window', 60)
+        ));
 
         $this->cachePrefix = config('fuse.cache.prefix', 'fuse');
 
@@ -101,8 +109,8 @@ class CircuitBreaker
         $attempts = (int) Cache::increment($attemptsKey);
         $failures = (int) Cache::increment($failuresKey);
 
-        Cache::put($attemptsKey, $attempts, 120);
-        Cache::put($failuresKey, $failures, 120);
+        Cache::put($attemptsKey, $attempts, $this->windowTtl());
+        Cache::put($failuresKey, $failures, $this->windowTtl());
 
         $failureRate = $attempts > 0 ? ($failures / $attempts) * 100 : 0;
 
@@ -136,7 +144,7 @@ class CircuitBreaker
     }
 
     /**
-     * @return array{state: string, attempts: int, failures: int, failure_rate: float, opened_at: ?int, recovery_at: ?int, timeout: int, threshold: int, min_requests: int}
+     * @return array{state: string, attempts: int, failures: int, failure_rate: float, opened_at: ?int, recovery_at: ?int, timeout: int, threshold: int, min_requests: int, window: int}
      */
     public function getStats(): array
     {
@@ -156,6 +164,7 @@ class CircuitBreaker
             'timeout' => $this->timeout,
             'threshold' => $this->failureThreshold,
             'min_requests' => $this->minRequests,
+            'window' => $this->windowSeconds,
         ];
     }
 
@@ -233,12 +242,17 @@ class CircuitBreaker
         $key = $this->key("attempts:{$window}");
 
         $attempts = (int) Cache::increment($key);
-        Cache::put($key, $attempts, 120);
+        Cache::put($key, $attempts, $this->windowTtl());
+    }
+
+    private function windowTtl(): int
+    {
+        return $this->windowSeconds * 2;
     }
 
     private function getCurrentWindow(): string
     {
-        return now()->format('YmdHi');
+        return (string) intdiv(now()->getTimestamp(), $this->windowSeconds);
     }
 
     public function key(string $suffix): string

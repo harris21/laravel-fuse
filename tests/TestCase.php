@@ -22,5 +22,6 @@ class TestCase extends Orchestra
         $app['config']->set('fuse.default_threshold', 50);
         $app['config']->set('fuse.default_timeout', 60);
         $app['config']->set('fuse.default_min_requests', 10);
+        $app['config']->set('fuse.default_window', 60);
     }
 }

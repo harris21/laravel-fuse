@@ -18,6 +18,7 @@ class ResolvesCircuitBreakers
                 return new CircuitBreakerMiddleware(
                     $instance->service,
                     release: $instance->release,
+                    window: $instance->window,
                 );
             },
             $reflection->getAttributes(UseCircuitBreaker::class)

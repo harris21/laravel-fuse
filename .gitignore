@@ -11,3 +11,4 @@ composer.lock
 coverage/
 .phpunit.cache/
 .claude/
+.playwright-mcp/

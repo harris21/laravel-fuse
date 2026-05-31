@@ -10,5 +10,6 @@ class UseCircuitBreaker
     public function __construct(
         public readonly string $service,
         public readonly ?int $release = null,
+        public readonly ?int $window = null,
     ) {}
 }

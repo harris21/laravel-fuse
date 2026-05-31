@@ -280,3 +280,93 @@ it('trips at different thresholds based on time of day', function () {
 
     expect($offPeakBreaker->isOpen())->toBeTrue();
 });
+
+it('uses a 60-second default window when none configured', function () {
+    $breaker = new CircuitBreaker('test-service');
+
+    expect($breaker->getStats()['window'])->toBe(60);
+});
+
+it('exposes the configured window in stats', function () {
+    config(['fuse.services.test-service.window' => 300]);
+
+    $stats = (new CircuitBreaker('test-service'))->getStats();
+
+    expect($stats['window'])->toBe(300)
+        ->and($stats)->toHaveKeys(['timeout', 'threshold', 'min_requests']);
+});
+
+it('accumulates failures across former minute boundaries within a long window', function () {
+    config(['fuse.services.slow' => [
+        'threshold' => 50,
+        'min_requests' => 10,
+        'window' => 600,
+    ]]);
+
+    $breaker = new CircuitBreaker('slow');
+
+    // One failure per minute for ten minutes. Under the old fixed 1-minute
+    // window each would land in its own bucket and never reach min_requests;
+    // a 600s window gathers all ten into a single bucket.
+    for ($minute = 0; $minute < 10; $minute++) {
+        Carbon::setTestNow(Carbon::createFromTime(12, $minute, 0));
+        $breaker->recordFailure();
+    }
+
+    expect($breaker->getStats()['attempts'])->toBe(10)
+        ->and($breaker->isOpen())->toBeTrue();
+});
+
+it('does not trip a low-throughput queue with the default 60s window', function () {
+    config(['fuse.services.slow' => [
+        'threshold' => 50,
+        'min_requests' => 10,
+    ]]);
+
+    $breaker = new CircuitBreaker('slow');
+
+    for ($minute = 0; $minute < 10; $minute++) {
+        Carbon::setTestNow(Carbon::createFromTime(12, $minute, 0));
+        $breaker->recordFailure();
+    }
+
+    expect($breaker->getStats()['attempts'])->toBe(1)
+        ->and($breaker->isClosed())->toBeTrue();
+});
+
+it('starts a fresh window after the window elapses', function () {
+    config(['fuse.services.slow' => [
+        'threshold' => 50,
+        'min_requests' => 5,
+        'window' => 120,
+    ]]);
+
+    $breaker = new CircuitBreaker('slow');
+
+    $breaker->recordFailure();
+    $breaker->recordFailure();
+
+    expect($breaker->getStats()['attempts'])->toBe(2);
+
+    Carbon::setTestNow(Carbon::createFromTime(12, 5, 0));
+
+    expect($breaker->getStats()['attempts'])->toBe(0);
+});
+
+it('uses an inline window override above service and default config', function () {
+    config([
+        'fuse.default_window' => 60,
+        'fuse.services.test-service.window' => 120,
+    ]);
+
+    expect((new CircuitBreaker('test-service', 300))->getStats()['window'])->toBe(300)
+        ->and((new CircuitBreaker('test-service'))->getStats()['window'])->toBe(120);
+});
+
+it('clamps a non-positive window to one second', function () {
+    config(['fuse.services.test-service.window' => 0]);
+    expect((new CircuitBreaker('test-service'))->getStats()['window'])->toBe(1);
+
+    config(['fuse.services.test-service.window' => -5]);
+    expect((new CircuitBreaker('test-service'))->getStats()['window'])->toBe(1);
+});

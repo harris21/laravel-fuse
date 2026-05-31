@@ -13,6 +13,7 @@ class CircuitBreakerMiddleware
     public function __construct(
         private readonly string $service,
         private readonly ?int $release = null,
+        private readonly ?int $window = null,
     ) {
         $config = config("fuse.services.{$this->service}", []);
 
@@ -28,7 +29,7 @@ class CircuitBreakerMiddleware
             return $next($job);
         }
 
-        $breaker = new CircuitBreaker($this->service);
+        $breaker = new CircuitBreaker($this->service, $this->window);
 
         if ($breaker->isOpen()) {
             return $job->release($this->releaseDelay);
