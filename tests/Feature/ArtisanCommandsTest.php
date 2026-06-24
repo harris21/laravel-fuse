@@ -6,6 +6,7 @@ use Harris21\Fuse\Events\CircuitBreakerOpened;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Event;
+use Symfony\Component\Console\Command\Command;
 
 beforeEach(function () {
     Cache::flush();
@@ -188,5 +189,5 @@ it('rejects using watch and json together', function () {
         '--json' => true,
     ])
         ->expectsOutput('The --watch and --json options cannot be used together.')
-        ->assertExitCode(\Symfony\Component\Console\Command\Command::INVALID);
+        ->assertExitCode(Command::INVALID);
 });
