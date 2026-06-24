@@ -3,6 +3,7 @@
 use Harris21\Fuse\CircuitBreaker;
 use Harris21\Fuse\Events\CircuitBreakerClosed;
 use Harris21\Fuse\Events\CircuitBreakerOpened;
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Event;
 
@@ -138,4 +139,31 @@ it('dispatches CircuitBreakerClosed event when force closing', function () {
         ->assertExitCode(0);
 
     Event::assertDispatched(CircuitBreakerClosed::class, fn ($event) => $event->service === 'stripe');
+});
+
+it('renders json output for fuse:status --json', function () {
+    config(['fuse.services' => [
+        'stripe' => ['threshold' => 50, 'timeout' => 30, 'min_requests' => 5],
+    ]]);
+
+    $exitCode = Artisan::call('fuse:status', ['--json' => true]);
+    $output = Artisan::output();
+
+    expect($exitCode)->toBe(0);
+    expect($output)->toContain('"service": "stripe"');
+    expect($output)->toContain('"threshold": 50');
+});
+
+it('renders json output for a single service', function () {
+    config(['fuse.services' => [
+        'stripe' => ['threshold' => 50, 'timeout' => 30, 'min_requests' => 5],
+        'mailgun' => ['threshold' => 60, 'timeout' => 45, 'min_requests' => 10],
+    ]]);
+
+    $exitCode = Artisan::call('fuse:status', ['service' => 'stripe', '--json' => true]);
+    $output = Artisan::output();
+
+    expect($exitCode)->toBe(0);
+    expect($output)->toContain('"service": "stripe"');
+    expect($output)->not->toContain('"service": "mailgun"');
 });
