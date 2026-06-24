@@ -30,6 +30,9 @@ class StateHistoryTracker
         Cache::put($lastStateKey, $currentState, now()->addHours(24));
     }
 
+    /**
+     * @return array<int, array{from: string, to: string, time: string}>
+     */
     public function getHistory(string $service): array
     {
         return Cache::get("fuse:status:history:{$service}", []);

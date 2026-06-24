@@ -119,6 +119,9 @@ class CircuitBreaker
         }
     }
 
+    /**
+     * @param  array<string, mixed>  $config
+     */
     private function resolveFailureClassifier(array $config): FailureClassifier
     {
         if (! isset($config['failure_classifier'])) {
@@ -160,7 +163,7 @@ class CircuitBreaker
             'failures' => $failures,
             'failure_rate' => $attempts > 0 ? round(($failures / $attempts) * 100, 1) : 0,
             'opened_at' => $openedAt,
-            'recovery_at' => $openedAt ? $openedAt + $this->timeout : null,
+            'recovery_at' => $openedAt ? (int) $openedAt + $this->timeout : null,
             'timeout' => $this->timeout,
             'threshold' => $this->failureThreshold,
             'min_requests' => $this->minRequests,

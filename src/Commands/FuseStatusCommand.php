@@ -83,7 +83,7 @@ class FuseStatusCommand extends Command
     {
         $payload = [];
         foreach ($services as $service) {
-            $breaker = new CircuitBreaker($service);
+            $breaker = new CircuitBreaker((string) $service);
             $stats = $breaker->getStats();
 
             $payload[] = [

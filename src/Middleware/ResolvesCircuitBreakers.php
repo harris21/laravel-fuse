@@ -7,6 +7,9 @@ use ReflectionClass;
 
 class ResolvesCircuitBreakers
 {
+    /**
+     * @return array<int, CircuitBreakerMiddleware>
+     */
     public static function resolve(object $job): array
     {
         $reflection = new ReflectionClass($job);
@@ -25,6 +28,10 @@ class ResolvesCircuitBreakers
         );
     }
 
+    /**
+     * @param  array<int, object>  $middleware
+     * @return array<int, object>
+     */
     public static function merge(object $job, array $middleware = []): array
     {
         return [

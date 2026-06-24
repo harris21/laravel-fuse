@@ -27,6 +27,9 @@ class StatusPageController
         ]);
     }
 
+    /**
+     * @return array<array-key, array<string, mixed>>
+     */
     private function buildServiceData(): array
     {
         $services = config('fuse.services', []);

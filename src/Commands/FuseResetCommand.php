@@ -32,7 +32,7 @@ class FuseResetCommand extends Command
         }
 
         foreach ($services as $service) {
-            (new CircuitBreaker($service))->reset();
+            (new CircuitBreaker((string) $service))->reset();
 
             $this->info("Circuit breaker {$service} has been reset to closed state");
         }
