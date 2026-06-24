@@ -10,7 +10,8 @@ class FuseStatusCommand extends Command
     protected $signature = 'fuse:status {service?}
 		{--json : JSON Output}
 		{--watch : Refresh continuously}
-		{--interval=5 : Refresh interval in seconds for watch mode}';
+		{--interval=5 : Refresh interval in seconds for watch mode}
+		{--iterations=0 : Number of refresh cycles before stopping in watch mode (0 = infinite)}';
 
     protected $description = 'Display the status of circuit breakers';
 
@@ -20,6 +21,12 @@ class FuseStatusCommand extends Command
 
         if ($services === null) {
             return self::SUCCESS;
+        }
+
+        if ($this->option('watch') && $this->option('json')) {
+            $this->warn('The --watch and --json options cannot be used together.');
+
+            return self::INVALID;
         }
 
         if ($this->option('watch')) {
@@ -129,6 +136,8 @@ class FuseStatusCommand extends Command
     private function watch(array $services): int
     {
         $interval = max(1, (int) $this->option('interval'));
+        $iterations = max(0, (int) $this->option('iterations'));
+        $runCount = 0;
 
         while (true) {
             $payload = $this->buildPayload($services);
@@ -149,6 +158,12 @@ class FuseStatusCommand extends Command
                 );
             } else {
                 $this->renderTable($payload);
+            }
+
+            $runCount++;
+
+            if ($iterations > 0 && $runCount >= $iterations) {
+                return self::SUCCESS;
             }
 
             sleep($interval);

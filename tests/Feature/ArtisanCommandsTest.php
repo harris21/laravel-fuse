@@ -167,3 +167,26 @@ it('renders json output for a single service', function () {
     expect($output)->toContain('"service": "stripe"');
     expect($output)->not->toContain('"service": "mailgun"');
 });
+
+it('renders one watch iteration in table mode', function () {
+    $exitCode = Artisan::call('fuse:status', [
+        '--watch' => true,
+        '--iterations' => 1,
+    ]);
+
+    $output = Artisan::output();
+
+    expect($exitCode)->toBe(0);
+    expect($output)->toContain('Fuse status - ');
+    expect($output)->toContain('stripe');
+    expect($output)->toContain('mailgun');
+});
+
+it('rejects using watch and json together', function () {
+    $this->artisan('fuse:status', [
+        '--watch' => true,
+        '--json' => true,
+    ])
+        ->expectsOutput('The --watch and --json options cannot be used together.')
+        ->assertExitCode(\Symfony\Component\Console\Command\Command::INVALID);
+});
