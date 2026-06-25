@@ -8,10 +8,7 @@ use Illuminate\Console\Command;
 class FuseStatusCommand extends Command
 {
     protected $signature = 'fuse:status {service?}
-		{--json : JSON Output}
-		{--watch : Refresh continuously}
-		{--interval=5 : Refresh interval in seconds for watch mode}
-		{--iterations=0 : Number of refresh cycles before stopping in watch mode (0 = infinite)}';
+		{--json : JSON Output}';
 
     protected $description = 'Display the status of circuit breakers';
 
@@ -23,25 +20,16 @@ class FuseStatusCommand extends Command
             return self::SUCCESS;
         }
 
-        if ($this->option('watch') && $this->option('json')) {
-            $this->warn('The --watch and --json options cannot be used together.');
-
-            return self::INVALID;
-        }
-
-        if ($this->option('watch')) {
-            return $this->watch($services);
-        }
-
         $payload = $this->buildPayload($services);
 
         if ($this->option('json')) {
-            $this->line(
-                json_encode([
-                    'services' => $payload,
-                ],
-                    JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES,
-                ));
+            $json = json_encode(
+                ['services' => $payload],
+                JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR,
+                512,
+            );
+
+            $this->line($json);
 
             return self::SUCCESS;
         }
@@ -51,6 +39,9 @@ class FuseStatusCommand extends Command
         return self::SUCCESS;
     }
 
+    /**
+     * @return list<string>|null
+     */
     private function resolveServices(): ?array
     {
         $service = $this->argument('service');
@@ -68,7 +59,12 @@ class FuseStatusCommand extends Command
 
         $services = $service
             ? [$service]
-            : array_keys(config('fuse.services', []));
+            : array_map(
+                static fn (
+                    mixed $configuredService,
+                ): string => (string) $configuredService,
+                array_keys(config('fuse.services', [])),
+            );
 
         if (empty($services)) {
             $this->warn('No services configured in config/fuse.php');
@@ -79,6 +75,22 @@ class FuseStatusCommand extends Command
         return $services;
     }
 
+    /**
+     * @param  list<string>  $services
+     * @return list<array{
+     *     service: string,
+     *     state: string,
+     *     failure_rate: float|int,
+     *     attempts: int,
+     *     failures: int,
+     *     threshold: int,
+     *     min_requests: int,
+     *     timeout: int,
+     *     window: int,
+     *     opened_at: int|null,
+     *     recovery_at: int|null
+     * }>
+     */
     private function buildPayload(array $services): array
     {
         $payload = [];
@@ -104,6 +116,21 @@ class FuseStatusCommand extends Command
         return $payload;
     }
 
+    /**
+     * @param  list<array{
+     *     service: string,
+     *     state: string,
+     *     failure_rate: float|int,
+     *     attempts: int,
+     *     failures: int,
+     *     threshold: int,
+     *     min_requests: int,
+     *     timeout: int,
+     *     window: int,
+     *     opened_at: int|null,
+     *     recovery_at: int|null
+     * }>  $payload
+     */
     private function renderTable(array $payload): void
     {
         $rows = array_map(function (array $service): array {
@@ -125,53 +152,18 @@ class FuseStatusCommand extends Command
             ];
         }, $payload);
 
-        $this->table(['Service', 'State', 'Failure Rate',
-            'Requests', 'Failures', 'Threshold',
-            'Timeout', 'Window',
-        ],
+        $this->table(
+            [
+                'Service',
+                'State',
+                'Failure Rate',
+                'Requests',
+                'Failures',
+                'Threshold',
+                'Timeout',
+                'Window',
+            ],
             $rows,
         );
-    }
-
-    private function watch(array $services): int
-    {
-        $interval = max(1, (int) $this->option('interval'));
-        $iterations = max(0, (int) $this->option('iterations'));
-        $runCount = 0;
-
-        while (true) {
-            $payload = $this->buildPayload($services);
-
-            $this->clearScreen();
-            $this->line('Fuse status - '.now()->toDateTimeString());
-            $this->newLine();
-
-            if ($this->option('json')) {
-                $this->line(
-                    json_encode(
-                        [
-                            'services' => $payload,
-                            'generated_at' => now()->toIso8601String(),
-                        ],
-                        JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES,
-                    ),
-                );
-            } else {
-                $this->renderTable($payload);
-            }
-
-            $runCount++;
-
-            if ($iterations > 0 && $runCount >= $iterations) {
-                return self::SUCCESS;
-            }
-
-            sleep($interval);
-        }
-    }
-
-    private function clearScreen(): void
-    {
-        $this->output->write("\033[2J\033[H");
     }
 }

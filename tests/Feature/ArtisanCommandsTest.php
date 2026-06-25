@@ -6,7 +6,6 @@ use Harris21\Fuse\Events\CircuitBreakerOpened;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Event;
-use Symfony\Component\Console\Command\Command;
 
 beforeEach(function () {
     Cache::flush();
@@ -167,27 +166,4 @@ it('renders json output for a single service', function () {
     expect($exitCode)->toBe(0);
     expect($output)->toContain('"service": "stripe"');
     expect($output)->not->toContain('"service": "mailgun"');
-});
-
-it('renders one watch iteration in table mode', function () {
-    $exitCode = Artisan::call('fuse:status', [
-        '--watch' => true,
-        '--iterations' => 1,
-    ]);
-
-    $output = Artisan::output();
-
-    expect($exitCode)->toBe(0);
-    expect($output)->toContain('Fuse status - ');
-    expect($output)->toContain('stripe');
-    expect($output)->toContain('mailgun');
-});
-
-it('rejects using watch and json together', function () {
-    $this->artisan('fuse:status', [
-        '--watch' => true,
-        '--json' => true,
-    ])
-        ->expectsOutput('The --watch and --json options cannot be used together.')
-        ->assertExitCode(Command::INVALID);
 });
