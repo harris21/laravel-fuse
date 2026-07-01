@@ -31,6 +31,7 @@ When Stripe goes down at 11 PM, your queue workers don't know. They keep trying 
 - **Thundering Herd Prevention** — `Cache::lock()` ensures only one worker probes during recovery
 - **Zero Data Loss** — Jobs are delayed with `release()`, not failed permanently
 - **Automatic Recovery** — Circuit tests and heals itself when services return
+- **Optional Recovery Strategies** — Single-probe works out of the box; plug in your own strategy if a service needs to warm back up differently
 - **Per-Service Circuits** — Separate breakers for Stripe, Mailgun, your microservices
 - **Laravel Events** — Get notified on state transitions for alerting and monitoring
 - **Real-Time Status Page** — Built-in monitoring dashboard with live state updates
@@ -48,7 +49,7 @@ When Stripe goes down at 11 PM, your queue workers don't know. They keep trying 
 
 **OPEN** — Protection mode. After the failure threshold is exceeded, the circuit trips. Jobs fail instantly (1ms, not 30s) and are delayed for automatic retry. No API calls are made.
 
-**HALF-OPEN** — Testing recovery. After the timeout period, one probe request tests if the service recovered. Success closes the circuit. Failure reopens it.
+**HALF-OPEN** — Testing recovery. After the timeout period, one probe request tests if the service recovered. Success closes the circuit. Failure reopens it. If you need to, you may [customize the probe request](#recovery-strategies).
 
 ---
 
@@ -311,6 +312,53 @@ class CustomFailureClassifier implements FailureClassifier
 ```
 
 When no `failure_classifier` is configured, Fuse uses `DefaultFailureClassifier` which preserves the behavior described in the table above.
+
+---
+
+## Recovery strategies
+
+By default, when a circuit is half-open, Fuse lets a single probe request through to test whether the service has recovered. If it succeeds, the circuit closes and traffic returns to full speed; if it fails, the circuit reopens. You don't need to configure anything for this — it's how Fuse works out of the box.
+
+If you would like more control over how a recovered service is tested, you may provide your own recovery strategy by implementing the `RecoveryStrategy` contract. This is entirely optional.
+
+For example, you might warm a slow service back up gradually instead of returning to full speed on the first success:
+
+```php
+namespace App\Fuse;
+
+use Harris21\Fuse\CircuitBreaker;
+use Harris21\Fuse\Contracts\RecoveryStrategy;
+
+class CustomRecoveryStrategy implements RecoveryStrategy
+{
+    public function allowsAttempt(CircuitBreaker $breaker): bool
+    {
+        // Return true to let this half-open job through, false to release it for a later retry.
+    }
+
+    public function recordSuccess(CircuitBreaker $breaker): bool
+    {
+        // Return true to fully close the circuit, false to keep testing.
+    }
+
+    public function recordFailure(CircuitBreaker $breaker): void
+    {
+        // Called when a half-open job fails. The circuit reopens around this call.
+    }
+}
+```
+
+Then reference your class via the `recovery_strategy` option on your service configuration. It is resolved through the container, just like `failure_classifier`:
+
+```php
+'services' => [
+    'stripe' => [
+        'recovery_strategy' => \App\Fuse\CustomRecoveryStrategy::class,
+    ],
+],
+```
+
+Use `$breaker->key('your-suffix')` to namespace any cache keys your strategy needs.
 
 ---
 

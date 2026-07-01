@@ -36,23 +36,25 @@ class CircuitBreakerMiddleware
         }
 
         if ($breaker->isHalfOpen()) {
-            $lock = Cache::lock($breaker->key('probe'), 5);
-
-            if ($lock->get()) {
-                try {
-                    $result = $next($job);
-                    $breaker->recordSuccess();
-
-                    return $result;
-                } catch (Throwable $e) {
-                    $breaker->recordFailure($e);
-                    throw $e;
-                } finally {
-                    $lock->forceRelease();
-                }
+            if (! $breaker->recoveryStrategy()->allowsAttempt($breaker)) {
+                return $job->release($this->releaseDelay);
             }
 
-            return $job->release($this->releaseDelay);
+            try {
+                $result = $next($job);
+                $breaker->recordSuccess();
+
+                return $result;
+            } catch (Throwable $e) {
+                $before = $breaker->getState();
+                $breaker->recordFailure($e);
+
+                if ($breaker->getState() === $before) {
+                    $breaker->recoveryStrategy()->recordFailure($breaker);
+                }
+
+                throw $e;
+            }
         }
 
         try {

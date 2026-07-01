@@ -4,10 +4,12 @@ namespace Harris21\Fuse;
 
 use Harris21\Fuse\Classifiers\DefaultFailureClassifier;
 use Harris21\Fuse\Contracts\FailureClassifier;
+use Harris21\Fuse\Contracts\RecoveryStrategy;
 use Harris21\Fuse\Enums\CircuitState;
 use Harris21\Fuse\Events\CircuitBreakerClosed;
 use Harris21\Fuse\Events\CircuitBreakerHalfOpen;
 use Harris21\Fuse\Events\CircuitBreakerOpened;
+use Harris21\Fuse\Strategies\SingleProbe;
 use Illuminate\Support\Facades\Cache;
 use InvalidArgumentException;
 use Throwable;
@@ -25,6 +27,8 @@ class CircuitBreaker
     private readonly string $cachePrefix;
 
     private readonly FailureClassifier $failureClassifier;
+
+    private readonly RecoveryStrategy $recoveryStrategy;
 
     public function __construct(private readonly string $serviceName, ?int $window = null)
     {
@@ -47,6 +51,13 @@ class CircuitBreaker
         $this->cachePrefix = config('fuse.cache.prefix', 'fuse');
 
         $this->failureClassifier = $this->resolveFailureClassifier($config);
+
+        $this->recoveryStrategy = $this->resolveRecoveryStrategy($config);
+    }
+
+    public function recoveryStrategy(): RecoveryStrategy
+    {
+        return $this->recoveryStrategy;
     }
 
     public function isOpen(): bool
@@ -81,10 +92,14 @@ class CircuitBreaker
         $this->incrementAttempts();
 
         if ($this->getState() === CircuitState::HalfOpen) {
-            $this->transitionTo(CircuitState::Closed);
+            if ($this->recoveryStrategy->recordSuccess($this)) {
+                $this->transitionTo(CircuitState::Closed);
+            }
+
+            return;
         }
 
-        Cache::lock($this->key('probe'))->forceRelease();
+        $this->recoveryStrategy->recordSuccess($this);
     }
 
     public function recordFailure(?Throwable $exception = null): void
@@ -96,8 +111,8 @@ class CircuitBreaker
         }
 
         if ($this->getState() === CircuitState::HalfOpen) {
+            $this->recoveryStrategy->recordFailure($this);
             $this->transitionTo(CircuitState::Open, 100, 1, 1);
-            Cache::lock($this->key('probe'))->forceRelease();
 
             return;
         }
@@ -137,6 +152,26 @@ class CircuitBreaker
         }
 
         return $classifier;
+    }
+
+    /**
+     * @param  array<string, mixed>  $config
+     */
+    private function resolveRecoveryStrategy(array $config): RecoveryStrategy
+    {
+        if (! isset($config['recovery_strategy'])) {
+            return new SingleProbe;
+        }
+
+        $strategy = app($config['recovery_strategy']);
+
+        if (! $strategy instanceof RecoveryStrategy) {
+            throw new InvalidArgumentException(
+                "Class [{$config['recovery_strategy']}] must implement ".RecoveryStrategy::class
+            );
+        }
+
+        return $strategy;
     }
 
     public function getState(): CircuitState
