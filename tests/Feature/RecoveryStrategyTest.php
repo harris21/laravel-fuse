@@ -83,6 +83,35 @@ it('resolves the configured recovery strategy through the container', function (
     expect($breaker->recoveryStrategy())->toBe($strategy);
 });
 
+it('does not invoke the recovery strategy on a success while the circuit is closed', function () {
+    $spy = new class implements RecoveryStrategy
+    {
+        public int $successes = 0;
+
+        public function allowsAttempt(CircuitBreaker $breaker): bool
+        {
+            return true;
+        }
+
+        public function recordSuccess(CircuitBreaker $breaker): bool
+        {
+            $this->successes++;
+
+            return true;
+        }
+
+        public function recordFailure(CircuitBreaker $breaker): void {}
+    };
+
+    app()->bind('counting-strategy', fn () => $spy);
+    config(['fuse.services.test-service.recovery_strategy' => 'counting-strategy']);
+
+    $middleware = new CircuitBreakerMiddleware('test-service');
+    $middleware->handle(makeJob(), fn () => 'success');
+
+    expect($spy->successes)->toBe(0);
+});
+
 it('throws when the recovery strategy does not implement the contract', function () {
     app()->bind('bad-strategy', fn () => new stdClass);
     config(['fuse.services.test-service.recovery_strategy' => 'bad-strategy']);

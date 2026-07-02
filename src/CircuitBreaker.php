@@ -95,11 +95,7 @@ class CircuitBreaker
             if ($this->recoveryStrategy->recordSuccess($this)) {
                 $this->transitionTo(CircuitState::Closed);
             }
-
-            return;
         }
-
-        $this->recoveryStrategy->recordSuccess($this);
     }
 
     public function recordFailure(?Throwable $exception = null): void
