@@ -141,6 +141,54 @@ it('dispatches CircuitBreakerClosed event when force closing', function () {
     Event::assertDispatched(CircuitBreakerClosed::class, fn ($event) => $event->service === 'stripe');
 });
 
+it('does not redispatch CircuitBreakerOpened when the circuit is already open', function () {
+    $this->artisan('fuse:open stripe')->assertExitCode(0);
+
+    Event::fake([CircuitBreakerOpened::class]);
+
+    $this->artisan('fuse:open stripe')->assertExitCode(0);
+
+    Event::assertNotDispatched(CircuitBreakerOpened::class);
+});
+
+it('still recovers automatically after the timeout when the circuit was manually opened', function () {
+    config(['fuse.default_timeout' => 1]);
+
+    $this->artisan('fuse:open stripe')->assertExitCode(0);
+
+    $breaker = new CircuitBreaker('stripe');
+    expect($breaker->isOpen())->toBeTrue();
+
+    sleep(2);
+
+    expect($breaker->isOpen())->toBeFalse()
+        ->and($breaker->isHalfOpen())->toBeTrue();
+});
+
+it('clears opened_at when manually closing a previously open circuit', function () {
+    $breaker = new CircuitBreaker('stripe');
+    for ($i = 0; $i < 5; $i++) {
+        $breaker->recordFailure();
+    }
+    expect($breaker->isOpen())->toBeTrue();
+    expect($breaker->getStats()['opened_at'])->not->toBeNull();
+
+    $this->artisan('fuse:close stripe')->assertExitCode(0);
+
+    expect($breaker->getStats()['opened_at'])->toBeNull();
+});
+
+it('does not redispatch CircuitBreakerClosed when the circuit is already closed', function () {
+    $breaker = new CircuitBreaker('stripe');
+    expect($breaker->isClosed())->toBeTrue();
+
+    Event::fake([CircuitBreakerClosed::class]);
+
+    $this->artisan('fuse:close stripe')->assertExitCode(0);
+
+    Event::assertNotDispatched(CircuitBreakerClosed::class);
+});
+
 it('renders json output for fuse:status --json', function () {
     config(['fuse.services' => [
         'stripe' => ['threshold' => 50, 'timeout' => 30, 'min_requests' => 5],
