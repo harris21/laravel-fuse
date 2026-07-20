@@ -406,6 +406,159 @@ class AlertOnCircuitOpen
 **CircuitBreakerClosed:**
 - `$service` — The service name
 
+### Wiring Events to Monitoring
+
+Fuse only emits events — it deliberately doesn't log, page, or export metrics itself, so nothing about your monitoring stack needs to be known by the package. Point a listener at whichever tool you already use.
+
+**Slack (or any webhook-based alert):**
+
+```php
+class NotifySlackOnCircuitOpen
+{
+    public function handle(CircuitBreakerOpened $event): void
+    {
+        Http::post(config('services.slack.webhook_url'), [
+            'text' => sprintf(
+                ':rotating_light: Circuit breaker OPEN for *%s* — %.1f%% failure rate (%d/%d requests)',
+                $event->service,
+                $event->failureRate,
+                $event->failures,
+                $event->attempts,
+            ),
+        ]);
+    }
+}
+```
+
+**Prometheus** (via whichever client you've wired into your app, e.g. `promphp/prometheus_client_php`):
+
+```php
+class RecordCircuitBreakerMetrics
+{
+    public function __construct(private CollectorRegistry $registry) {}
+
+    private function gauge(): \Prometheus\Gauge
+    {
+        return $this->registry->getOrRegisterGauge(
+            'fuse', 'circuit_open', 'Circuit breaker state (1 = open, 0 = closed)', ['service']
+        );
+    }
+
+    public function handleOpened(CircuitBreakerOpened $event): void
+    {
+        $this->gauge()->set(1, [$event->service]);
+    }
+
+    public function handleClosed(CircuitBreakerClosed $event): void
+    {
+        $this->gauge()->set(0, [$event->service]);
+    }
+}
+```
+
+Map both methods to their respective events in your `EventServiceProvider` (or listener attributes), same as any other multi-event listener.
+
+**Laravel Pulse** (custom recorder — check your installed Pulse version's docs for the exact recorder signature):
+
+```php
+namespace App\Recorders;
+
+use Harris21\Fuse\Events\CircuitBreakerOpened;
+use Laravel\Pulse\Facades\Pulse;
+
+class CircuitBreakerRecorder
+{
+    public array $listen = [CircuitBreakerOpened::class];
+
+    public function record(CircuitBreakerOpened $event): void
+    {
+        Pulse::record('fuse_circuit_open', $event->service)->count();
+    }
+}
+```
+
+Register it in `config/pulse.php` under `recorders`, and it'll show up alongside your other Pulse cards.
+
+---
+
+## Real-World Scenarios
+
+### Stripe goes down at 11 PM
+
+```php
+// config/fuse.php
+'services' => [
+    'stripe' => [
+        'threshold' => 50,     // trip at 50% failure rate
+        'timeout' => 30,       // wait 30s before probing again
+        'min_requests' => 5,   // need at least 5 requests to evaluate
+    ],
+],
+```
+
+```php
+class ChargeCustomer implements ShouldQueue
+{
+    public $tries = 0;
+    public $maxExceptions = 3;
+
+    public function middleware(): array
+    {
+        return [new CircuitBreakerMiddleware('stripe', release: 20)];
+    }
+
+    public function handle(): void
+    {
+        Stripe::charges()->create([...]);
+    }
+}
+```
+
+What actually happens, second by second:
+
+1. **11:00:00 PM** — Stripe starts returning `503`s. Jobs still run at full speed; each one waits out a real timeout before failing, and every failure is tallied in the current window.
+2. **11:00:04 PM** — The 5th failure lands and the failure rate crosses 50%. The circuit trips: `CircuitBreakerOpened` fires with the failure rate, attempts, and failure count for your listeners to log or alert on.
+3. **11:00:04 PM onward** — Every new `ChargeCustomer` job fails in the middleware in about 1ms, no HTTP call made, and is released back onto the queue with a 20s delay (`release: 20`). Your workers stay free to process jobs for other services instead of blocking on Stripe timeouts.
+4. **11:00:34 PM** — 30 seconds after opening, the next job to run is let through as a single probe. The circuit is now half-open; `CircuitBreakerHalfOpen` fires. Every other released job stays parked — the recovery strategy only ever admits one probe at a time (see [Recovery strategies](#recovery-strategies)).
+5. **Two outcomes:**
+   - **Stripe recovered:** the probe succeeds, the circuit closes, `CircuitBreakerClosed` fires, and the backlog of released jobs drains at full speed as their delays expire.
+   - **Stripe is still down:** the probe fails, the circuit reopens immediately (no need to re-accumulate 5 failures), and the cycle repeats from step 4 after another 30s.
+
+Without Fuse, all of those queued jobs would each burn a full HTTP timeout retrying Stripe directly. With it, the queue stops hammering a dead endpoint within one failure window and resumes automatically the moment Stripe answers again.
+
+### Isolating one customer's broken webhook endpoint
+
+A common queue pattern is delivering outbound webhooks to URLs your customers configure themselves — you don't control their uptime, and one customer's misconfigured or down endpoint shouldn't slow down deliveries to everyone else.
+
+Fuse's circuits are just keyed by the string you pass in, so naming the circuit per-recipient gets you per-recipient isolation for free — no extra config needed, since an unconfigured circuit name simply falls back to your `default_*` settings:
+
+```php
+class DeliverWebhook implements ShouldQueue
+{
+    public $tries = 0;
+    public $maxExceptions = 3;
+
+    public function __construct(
+        private WebhookEndpoint $endpoint,
+        private array $payload,
+    ) {}
+
+    public function middleware(): array
+    {
+        return [new CircuitBreakerMiddleware("webhook:{$this->endpoint->id}", release: 30)];
+    }
+
+    public function handle(): void
+    {
+        Http::timeout(5)->post($this->endpoint->url, $this->payload)->throw();
+    }
+}
+```
+
+If endpoint `#42` starts timing out, only the `webhook:42` circuit trips. Deliveries to endpoints `#7`, `#118`, and everyone else keep flowing at full speed through the same queue, same workers, same job class — they're each tracked under their own service name and never see endpoint 42's failures. Once endpoint 42 recovers, its circuit closes independently, exactly like the Stripe scenario above.
+
+**Caveat:** `fuse:status`, `fuse:open`/`fuse:close`, and the status page dashboard all only know about service names listed under `fuse.services` in your config — they can't discover or display dynamically-named circuits like `webhook:42`. If you need CLI/dashboard visibility into a specific high-traffic endpoint, add it to `config/fuse.php` explicitly; otherwise, inspect it programmatically with `(new CircuitBreaker("webhook:{$id}"))->getStats()`.
+
 ---
 
 ## Status Page
