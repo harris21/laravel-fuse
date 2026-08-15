@@ -214,14 +214,20 @@ class CircuitBreaker
         Cache::lock($this->key('transition'))->forceRelease();
     }
 
-    public function forceOpen(): void
+    /**
+     * @return bool Whether the circuit actually changed state.
+     */
+    public function forceOpen(): bool
     {
-        $this->transitionTo(CircuitState::Open);
+        return $this->transitionTo(CircuitState::Open);
     }
 
-    public function forceClose(): void
+    /**
+     * @return bool Whether the circuit actually changed state.
+     */
+    public function forceClose(): bool
     {
-        $this->transitionTo(CircuitState::Closed);
+        return $this->transitionTo(CircuitState::Closed);
     }
 
     private function transitionTo(
@@ -229,10 +235,10 @@ class CircuitBreaker
         float $failureRate = 0,
         int $attempts = 0,
         int $failures = 0
-    ): void {
+    ): bool {
         $lock = Cache::lock($this->key('transition'), 5);
 
-        $acquired = $lock->get(function () use ($newState) {
+        $changed = (bool) $lock->get(function () use ($newState) {
             if ($this->getState() === $newState) {
                 return false;
             }
@@ -250,7 +256,7 @@ class CircuitBreaker
             return true;
         });
 
-        if ($acquired) {
+        if ($changed) {
             match ($newState) {
                 CircuitState::Open => event(new CircuitBreakerOpened(
                     $this->serviceName,
@@ -262,6 +268,8 @@ class CircuitBreaker
                 CircuitState::Closed => event(new CircuitBreakerClosed($this->serviceName)),
             };
         }
+
+        return $changed;
     }
 
     private function incrementAttempts(): void

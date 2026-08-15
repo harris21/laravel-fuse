@@ -21,7 +21,11 @@ class FuseOpenCommand extends Command
             return self::SUCCESS;
         }
 
-        (new CircuitBreaker($service))->forceOpen();
+        if (! (new CircuitBreaker($service))->forceOpen()) {
+            $this->info("Circuit breaker for {$service} was already open.");
+
+            return self::SUCCESS;
+        }
 
         $this->info("Circuit breaker for {$service} has been manually opened.");
 

@@ -21,7 +21,11 @@ class FuseCloseCommand extends Command
             return self::SUCCESS;
         }
 
-        (new CircuitBreaker($service))->forceClose();
+        if (! (new CircuitBreaker($service))->forceClose()) {
+            $this->info("Circuit breaker for {$service} was already closed.");
+
+            return self::SUCCESS;
+        }
 
         $this->info("Circuit breaker for {$service} has been manually closed.");
 
