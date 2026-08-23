@@ -613,7 +613,7 @@
             `).join('');
         }
 
-        function updateAlertBanner(state, openedAt, recoveryAt, stateChanged) {
+        function updateAlertBanner(state, openedAt, recoveryAt, stateChanged, probeCandidate) {
             const container = document.getElementById('alert-container');
 
             if (stateChanged) {
@@ -639,6 +639,7 @@
                                             <span id="alert-recovery-at" class="dark:text-neon-amber text-day-amber ml-2">${recoveryAt || '-'}</span>
                                         </div>
                                     </div>
+                                    <p id="alert-probe-candidate" class="text-theme-muted text-sm mt-2 font-mono"></p>
                                 </div>
                             </div>
                         </div>
@@ -655,6 +656,7 @@
                                 <div>
                                     <h4 class="font-display font-bold text-xl dark:text-neon-amber text-day-amber mb-1">Testing Recovery</h4>
                                     <p class="text-theme-muted text-sm">A single probe request is testing if the service has recovered. Success closes the circuit, failure re-opens it.</p>
+                                    <p id="alert-probe-candidate" class="text-theme-muted text-sm mt-2 font-mono"></p>
                                 </div>
                             </div>
                         </div>
@@ -662,7 +664,19 @@
                 } else {
                     container.innerHTML = '';
                 }
-            } else if (state === 'open') {
+            }
+
+            if (state === 'open' || state === 'half_open') {
+                const probeEl = document.getElementById('alert-probe-candidate');
+                if (probeEl) {
+                    const label = state === 'open' ? 'Probe candidate' : 'Elected probe';
+                    probeEl.textContent = probeCandidate
+                        ? `${label}: ${probeCandidate.name.split('\\').pop()} (${probeCandidate.uuid}, dispatched ${new Date(probeCandidate.created_at * 1000).toLocaleTimeString()})`
+                        : '';
+                }
+            }
+
+            if (state === 'open') {
                 const openedAtEl = document.getElementById('alert-opened-at');
                 const recoveryAtEl = document.getElementById('alert-recovery-at');
                 if (openedAtEl) openedAtEl.textContent = openedAt || '-';
@@ -703,7 +717,8 @@
             updateAlertBanner(state,
                 data.opened_at ? new Date(data.opened_at * 1000).toLocaleTimeString() : null,
                 data.recovery_at ? new Date(data.recovery_at * 1000).toLocaleTimeString() : null,
-                stateChanged
+                stateChanged,
+                data.probe_candidate ?? null
             );
 
             // Stats

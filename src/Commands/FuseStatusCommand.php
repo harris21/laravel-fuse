@@ -88,7 +88,8 @@ class FuseStatusCommand extends Command
      *     timeout: int,
      *     window: int,
      *     opened_at: int|null,
-     *     recovery_at: int|null
+     *     recovery_at: int|null,
+     *     probe_candidate: array{uuid: string, created_at: int, name: string}|null
      * }>
      */
     private function buildPayload(array $services): array
@@ -110,6 +111,7 @@ class FuseStatusCommand extends Command
                 'window' => $stats['window'],
                 'opened_at' => $stats['opened_at'],
                 'recovery_at' => $stats['recovery_at'],
+                'probe_candidate' => $stats['probe_candidate'],
             ];
         }
 
@@ -128,7 +130,8 @@ class FuseStatusCommand extends Command
      *     timeout: int,
      *     window: int,
      *     opened_at: int|null,
-     *     recovery_at: int|null
+     *     recovery_at: int|null,
+     *     probe_candidate: array{uuid: string, created_at: int, name: string}|null
      * }>  $payload
      */
     private function renderTable(array $payload): void
@@ -149,6 +152,7 @@ class FuseStatusCommand extends Command
                 $service['threshold'].'%',
                 $service['timeout'].'s',
                 $service['window'].'s',
+                $this->describeProbe($service['probe_candidate']),
             ];
         }, $payload);
 
@@ -162,8 +166,24 @@ class FuseStatusCommand extends Command
                 'Threshold',
                 'Timeout',
                 'Window',
+                'Probe',
             ],
             $rows,
         );
+    }
+
+    /**
+     * @param  array{uuid: string, created_at: int, name: string}|null  $candidate
+     */
+    private function describeProbe(?array $candidate): string
+    {
+        if ($candidate === null) {
+            return '-';
+        }
+
+        $name = class_basename($candidate['name']);
+        $age = max(0, time() - $candidate['created_at']);
+
+        return "{$name} ({$age}s old)";
     }
 }

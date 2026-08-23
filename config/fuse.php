@@ -17,8 +17,8 @@ return [
     | Default Settings
     |--------------------------------------------------------------------------
     |
-    | Default threshold, timeout, minimum requests, release delay, and tracking
-    | window for circuit breakers.
+    | Default threshold, timeout, minimum requests, release delay, probe lock,
+    | and tracking window for circuit breakers.
     | These can be overridden per-service in the 'services' array below.
     |
     */
@@ -26,6 +26,7 @@ return [
     'default_timeout' => 60,        // Seconds before transitioning to half-open
     'default_min_requests' => 10,   // Minimum requests before evaluating threshold
     'default_release' => 10,        // Seconds to delay a job when the circuit is open
+    'default_probe_lock_ttl' => 65, // Seconds to hold the half-open probe lock
     'default_window' => 60,         // Seconds per failure-tracking window (tumbling bucket)
 
     /*
@@ -34,20 +35,23 @@ return [
     |--------------------------------------------------------------------------
     |
     | Configure circuit breaker settings per external service. Each service
-    | can have custom thresholds, timeouts, minimum request counts
-    | and release delays.
+    | can have custom thresholds, timeouts, minimum request counts, release
+    | delays, and probe locks.
     |
     | Available options:
     | - threshold: Failure rate percentage to trip the circuit (default: 50)
     | - timeout: Seconds before transitioning to half-open (default: 60)
     | - min_requests: Minimum requests before evaluating threshold (default: 10)
     | - release: Seconds to delay a job when the circuit is open (default: 10)
+    | - probe_lock_ttl: Seconds to hold the half-open probe lock (default: 65)
     | - window: Seconds per failure-tracking window; raise for low-throughput queues (default: 60)
     | - peak_hours_threshold: Alternative threshold during peak hours (optional)
     | - peak_hours_start: Hour (0-23) when peak hours begin (optional)
     | - peak_hours_end: Hour (0-23) when peak hours end (optional)
     | - failure_classifier: Custom FailureClassifier class for this service (optional)
-    | - recovery_strategy: Custom RecoveryStrategy class for this service (optional)
+    | - recovery_strategy: Custom RecoveryStrategy class for this service (optional).
+    |   Use \Harris21\Fuse\Strategies\OldestJobProbe::class to keep the oldest
+    |   held job as the probe across recovery attempts.
     |
     */
     'services' => [

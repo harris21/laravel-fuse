@@ -1,5 +1,6 @@
 <?php
 
+use Carbon\Carbon;
 use Harris21\Fuse\CircuitBreaker;
 use Harris21\Fuse\Contracts\RecoveryStrategy;
 use Harris21\Fuse\Middleware\CircuitBreakerMiddleware;
@@ -14,44 +15,6 @@ beforeEach(function () {
     config(['fuse.default_min_requests' => 5]);
     config(['fuse.default_release' => 10]);
 });
-
-function tripToHalfOpen(string $service = 'test-service'): CircuitBreaker
-{
-    config(['fuse.default_timeout' => 1]);
-
-    $breaker = new CircuitBreaker($service);
-    for ($i = 0; $i < 5; $i++) {
-        $breaker->recordFailure();
-    }
-
-    expect($breaker->isOpen())->toBeTrue();
-
-    sleep(2);
-    $breaker->isOpen();
-    expect($breaker->isHalfOpen())->toBeTrue();
-
-    return $breaker;
-}
-
-function makeJob(): object
-{
-    return new class
-    {
-        public bool $handled = false;
-
-        public bool $released = false;
-
-        public int $releaseDelay = 0;
-
-        public function release(int $delay): string
-        {
-            $this->released = true;
-            $this->releaseDelay = $delay;
-
-            return 'released';
-        }
-    };
-}
 
 it('defaults to the SingleProbe strategy when none is configured', function () {
     $breaker = new CircuitBreaker('test-service');
@@ -152,6 +115,57 @@ it('single-probe releases concurrent workers while one probe runs', function () 
     expect($result)->toBe('released');
 
     $probeLock->forceRelease();
+});
+
+it('keeps the default single-probe lock beyond five seconds', function () {
+    Carbon::setTestNow(Carbon::now());
+
+    try {
+        tripToHalfOpen();
+
+        $middleware = new CircuitBreakerMiddleware('test-service');
+        $concurrent = makeJob();
+
+        $middleware->handle(makeJob(), function () use ($middleware, $concurrent) {
+            Carbon::setTestNow(now()->addSeconds(6));
+
+            $result = $middleware->handle($concurrent, fn () => 'success');
+
+            expect($result)->toBe('released');
+
+            return 'success';
+        });
+
+        expect($concurrent->released)->toBeTrue();
+    } finally {
+        Carbon::setTestNow();
+    }
+});
+
+it('uses the probe lock fallback when its global config is null', function () {
+    config(['fuse.default_probe_lock_ttl' => null]);
+    Carbon::setTestNow(Carbon::now());
+
+    try {
+        tripToHalfOpen();
+
+        $middleware = new CircuitBreakerMiddleware('test-service');
+        $concurrent = makeJob();
+
+        $middleware->handle(makeJob(), function () use ($middleware, $concurrent) {
+            Carbon::setTestNow(now()->addSeconds(6));
+
+            $result = $middleware->handle($concurrent, fn () => 'success');
+
+            expect($result)->toBe('released');
+
+            return 'success';
+        });
+
+        expect($concurrent->released)->toBeTrue();
+    } finally {
+        Carbon::setTestNow();
+    }
 });
 
 it('reopens the circuit when the probe fails in half-open', function () {

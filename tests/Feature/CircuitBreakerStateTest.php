@@ -2,8 +2,43 @@
 
 use Carbon\Carbon;
 use Harris21\Fuse\CircuitBreaker;
+use Harris21\Fuse\Contracts\JobAwareRecoveryStrategy;
 use Harris21\Fuse\Enums\CircuitState;
+use Harris21\Fuse\HeldJob;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
+
+class ThrowingCandidateCleanupStrategy implements JobAwareRecoveryStrategy
+{
+    public function observeHeldJob(CircuitBreaker $breaker, HeldJob $job): void {}
+
+    public function allowsAttemptFor(CircuitBreaker $breaker, HeldJob $job): bool
+    {
+        return true;
+    }
+
+    public function candidate(CircuitBreaker $breaker): ?array
+    {
+        return null;
+    }
+
+    public function forgetCandidate(CircuitBreaker $breaker): void
+    {
+        throw new RuntimeException('cache unavailable');
+    }
+
+    public function allowsAttempt(CircuitBreaker $breaker): bool
+    {
+        return true;
+    }
+
+    public function recordSuccess(CircuitBreaker $breaker): bool
+    {
+        return true;
+    }
+
+    public function recordFailure(CircuitBreaker $breaker): void {}
+}
 
 beforeEach(function () {
     Cache::flush();
@@ -102,6 +137,79 @@ it('transitions to closed on success in half-open state', function () {
     expect($breaker->isClosed())->toBeTrue();
 });
 
+it('keeps the circuit closed when candidate cleanup fails', function () {
+    Log::spy();
+    config(['fuse.services.test-service.recovery_strategy' => ThrowingCandidateCleanupStrategy::class]);
+
+    $breaker = new CircuitBreaker('test-service');
+    $breaker->forceOpen();
+
+    expect($breaker->forceClose())->toBeTrue()
+        ->and($breaker->isClosed())->toBeTrue();
+});
+
+it('keeps a successful half-open probe closed when candidate cleanup fails', function () {
+    Log::spy();
+    config(['fuse.services.test-service.recovery_strategy' => ThrowingCandidateCleanupStrategy::class]);
+
+    $breaker = new CircuitBreaker('test-service');
+    $breaker->forceOpen();
+    Cache::put($breaker->key('opened_at'), time() - 61);
+    $breaker->isOpen();
+
+    expect($breaker->isHalfOpen())->toBeTrue();
+
+    $breaker->recordSuccess();
+
+    expect($breaker->isClosed())->toBeTrue();
+});
+
+it('cleans a closed-state candidate before publishing the open state', function () {
+    $strategy = new class implements JobAwareRecoveryStrategy
+    {
+        /** @var list<CircuitState> */
+        public array $states = [];
+
+        public function observeHeldJob(CircuitBreaker $breaker, HeldJob $job): void {}
+
+        public function allowsAttemptFor(CircuitBreaker $breaker, HeldJob $job): bool
+        {
+            return true;
+        }
+
+        public function candidate(CircuitBreaker $breaker): ?array
+        {
+            return null;
+        }
+
+        public function forgetCandidate(CircuitBreaker $breaker): void
+        {
+            $this->states[] = $breaker->getState();
+        }
+
+        public function allowsAttempt(CircuitBreaker $breaker): bool
+        {
+            return true;
+        }
+
+        public function recordSuccess(CircuitBreaker $breaker): bool
+        {
+            return true;
+        }
+
+        public function recordFailure(CircuitBreaker $breaker): void {}
+    };
+
+    app()->bind('records-cleanup-state', fn () => $strategy);
+    config(['fuse.services.test-service.recovery_strategy' => 'records-cleanup-state']);
+
+    $breaker = new CircuitBreaker('test-service');
+    $breaker->forceOpen();
+
+    expect($strategy->states)->toBe([CircuitState::Closed])
+        ->and($breaker->isOpen())->toBeTrue();
+});
+
 it('transitions back to open on failure in half-open state', function () {
     config(['fuse.services.test-service.timeout' => 1]);
 
@@ -174,6 +282,29 @@ it('uses service-specific config', function () {
     expect($stats['threshold'])->toBe(30);
     expect($stats['timeout'])->toBe(120);
     expect($stats['min_requests'])->toBe(3);
+});
+
+it('resolves release and probe lock timing from service config and job timeout', function () {
+    config(['fuse.services.test-service.release' => 20]);
+    config(['fuse.services.test-service.probe_lock_ttl' => 90]);
+
+    $configured = new CircuitBreaker('test-service');
+    $withJobTimeout = new CircuitBreaker('test-service', release: 30, jobTimeout: 120);
+
+    expect($configured->releaseDelay())->toBe(20)
+        ->and($configured->probeLockTtl())->toBe(90)
+        ->and($withJobTimeout->releaseDelay())->toBe(30)
+        ->and($withJobTimeout->probeLockTtl())->toBe(125);
+});
+
+it('uses timing fallbacks when the global values are null', function () {
+    config(['fuse.default_release' => null]);
+    config(['fuse.default_probe_lock_ttl' => null]);
+
+    $breaker = new CircuitBreaker('test-service');
+
+    expect($breaker->releaseDelay())->toBe(10)
+        ->and($breaker->probeLockTtl())->toBe(65);
 });
 
 it('maintains separate state for different services', function () {
@@ -369,4 +500,25 @@ it('clamps a non-positive window to one second', function () {
 
     config(['fuse.services.test-service.window' => -5]);
     expect((new CircuitBreaker('test-service'))->getStats()['window'])->toBe(1);
+});
+
+it('stays open for a worker that loses the half-open transition lock', function () {
+    config(['fuse.services.test-service.timeout' => 1]);
+
+    $breaker = new CircuitBreaker('test-service');
+
+    for ($i = 0; $i < 5; $i++) {
+        $breaker->recordFailure();
+    }
+
+    sleep(2);
+
+    $transition = Cache::lock($breaker->key('transition'), 5);
+    expect($transition->get())->toBeTrue();
+
+    expect($breaker->isOpen())->toBeTrue();
+    expect($breaker->isHalfOpen())->toBeFalse();
+    expect($breaker->getState())->toBe(CircuitState::Open);
+
+    $transition->forceRelease();
 });

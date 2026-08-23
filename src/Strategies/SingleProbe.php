@@ -8,11 +8,9 @@ use Illuminate\Support\Facades\Cache;
 
 class SingleProbe implements RecoveryStrategy
 {
-    private const PROBE_TTL = 5;
-
     public function allowsAttempt(CircuitBreaker $breaker): bool
     {
-        return Cache::lock($breaker->key('probe'), self::PROBE_TTL)->get();
+        return Cache::lock($breaker->key('probe'), $breaker->probeLockTtl())->get();
     }
 
     public function recordSuccess(CircuitBreaker $breaker): bool
