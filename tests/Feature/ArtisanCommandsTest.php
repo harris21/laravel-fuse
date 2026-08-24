@@ -3,6 +3,7 @@
 use Harris21\Fuse\CircuitBreaker;
 use Harris21\Fuse\Events\CircuitBreakerClosed;
 use Harris21\Fuse\Events\CircuitBreakerOpened;
+use Harris21\Fuse\Strategies\OldestJobProbe;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Event;
@@ -127,6 +128,23 @@ it('manually closes a circuit breaker', function () {
     expect($breaker->isClosed())->toBeTrue();
 });
 
+it('clears an elected probe when manually closing a circuit breaker', function () {
+    config(['fuse.services.stripe.recovery_strategy' => OldestJobProbe::class]);
+    $breaker = new CircuitBreaker('stripe');
+
+    for ($i = 0; $i < 5; $i++) {
+        $breaker->recordFailure();
+    }
+
+    Cache::put('fuse:stripe:probe-candidate', ['uuid' => 'abc-123', 'created_at' => 1000, 'name' => 'App\Jobs\ChargeCustomer'], 60);
+    Cache::put('fuse:probe-candidate:abc-123', 'stripe', 60);
+
+    $this->artisan('fuse:close stripe')->assertExitCode(0);
+
+    expect(Cache::get('fuse:stripe:probe-candidate'))->toBeNull()
+        ->and(Cache::get('fuse:probe-candidate:abc-123'))->toBeNull();
+});
+
 it('dispatches CircuitBreakerClosed event when force closing', function () {
     Event::fake([CircuitBreakerClosed::class]);
 
@@ -240,4 +258,32 @@ it('renders json output for a single service', function () {
     expect($exitCode)->toBe(0);
     expect($output)->toContain('"service": "stripe"');
     expect($output)->not->toContain('"service": "mailgun"');
+});
+
+it('includes the elected probe job in fuse:status --json', function () {
+    config(['fuse.services' => [
+        'stripe' => ['threshold' => 50, 'timeout' => 30, 'min_requests' => 5, 'recovery_strategy' => OldestJobProbe::class],
+    ]]);
+    (new CircuitBreaker('stripe'))->forceOpen();
+    Cache::put('fuse:stripe:probe-candidate', ['uuid' => 'abc-123', 'created_at' => 1000, 'name' => 'App\\Jobs\\ChargeCustomer'], 60);
+
+    Artisan::call('fuse:status', ['--json' => true]);
+    $output = Artisan::output();
+
+    expect($output)->toContain('"probe_candidate"');
+    expect($output)->toContain('"uuid": "abc-123"');
+    expect($output)->toContain('"name": "App\\\\Jobs\\\\ChargeCustomer"');
+});
+
+it('shows the elected probe job in the fuse:status table', function () {
+    config(['fuse.services' => [
+        'stripe' => ['threshold' => 50, 'timeout' => 30, 'min_requests' => 5, 'recovery_strategy' => OldestJobProbe::class],
+    ]]);
+    (new CircuitBreaker('stripe'))->forceOpen();
+    Cache::put('fuse:stripe:probe-candidate', ['uuid' => 'abc-123', 'created_at' => 1000, 'name' => 'App\\Jobs\\ChargeCustomer'], 60);
+
+    $this->artisan('fuse:status')
+        ->expectsOutputToContain('Probe')
+        ->expectsOutputToContain('ChargeCustomer')
+        ->assertExitCode(0);
 });

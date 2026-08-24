@@ -158,6 +158,8 @@ return [
     'default_threshold' => 50,      // Failure rate percentage to trip circuit
     'default_timeout' => 60,        // Seconds before testing recovery
     'default_min_requests' => 10,   // Minimum requests before evaluating
+    'default_release' => 10,        // Seconds to delay an open-circuit job
+    'default_probe_lock_ttl' => 65, // Seconds to hold the half-open probe lock
     'default_window' => 60,         // Seconds per failure-tracking window
 
     'services' => [
@@ -359,6 +361,42 @@ Then reference your class via the `recovery_strategy` option on your service con
 ```
 
 Use `$breaker->key('your-suffix')` to namespace any cache keys your strategy needs.
+
+### Where does the probe job go?
+
+After my talk at Laravel Live Denmark 2026, three or four people asked the same thing: when the circuit goes half-open and the test job runs, where does that job go afterwards? Back to the top of the queue where it was, or to the bottom?
+
+The bottom, and the same is true for every job released while the circuit is open. `release()` is the only portable way Laravel gives a job middleware to put a job back, and on Redis and the database driver it always lands at the tail. Redis moves it through the delayed set and pushes it onto the end of the list; the database driver deletes the row and inserts a new one with a higher id. SQS just hides the message for the delay, so it keeps its slot there, but SQS standard queues don't promise order to begin with.
+
+This matters most for the probe. Say jobs A, B and C were queued in that order when the circuit opened. After the timeout, A runs as the probe and fails. Laravel's worker releases A with the job's `backoff` (default 0), A gets popped again a moment later, the circuit is open now, and Fuse releases it with the normal delay. B and C were released the moment the probe slot was taken, so they are already ahead of A in the delayed set. Which job probes next depends on which one comes due first after the timeout, and it is rarely A. Measured with three workers and six jobs on Redis: the probes across four cycles were jobs 5, 6, 4 and 5, and job 3 was the first one through when the service came back.
+
+If you want the oldest held job to remain the recovery probe, switch the service to the `OldestJobProbe` strategy:
+
+```php
+'services' => [
+    'stripe' => [
+        'recovery_strategy' => \Harris21\Fuse\Strategies\OldestJobProbe::class,
+    ],
+],
+```
+
+It works like this. While the circuit is open, every held job passes through the middleware once per `release` interval, so within one interval Fuse has seen the whole backlog. It keeps the job with the oldest dispatch time (the `createdAt` stamp Laravel writes into the payload, which survives every release). When the circuit goes half-open, only that job is allowed to run; the rest are released as usual. If the probe fails, the same job is the probe next time. It stays the probe until it succeeds, or until Laravel fails it for good via `maxExceptions`, at which point the next oldest job takes over.
+
+Every admitted probe also holds a cache lock. `default_probe_lock_ttl` is 65 seconds, and `probe_lock_ttl` overrides it per service. If the job declares a positive `$timeout`, Fuse uses at least `$timeout + 5`. Set the value higher than any worker timeout or probe runtime, and use a finite timeout for probe jobs.
+
+What this gives you, precisely:
+
+- The oldest held job is the probe, and it stays the probe across reopen cycles. This holds with any number of workers, because the choice is made by dispatch time, not by which worker popped first.
+- Jobs dispatched in the same second tie, and the first one Fuse sees wins.
+
+What it does not give you:
+
+- Jobs dispatched *during* the outage can still overtake held jobs once the circuit closes. A new job is pushed to the tail on arrival; a held job lands behind it on its next release cycle. No circuit breaker built on `release()` can prevent that, with one worker or many, because `release()` has no way to put a job back ahead of work that arrived after it.
+- Ordering among jobs that belong to the same record, such as the steps of one order. That is what `Bus::chain()` is for: the second job isn't dispatched until the first succeeds, so there is only ever one job of the chain in the queue.
+
+While open, `fuse:status` and the status page show the current probe candidate. The candidate can change as Fuse sees older held jobs. Once half-open, the same field shows the elected probe. JSON uses `probe_candidate`; the table uses the `Probe` column.
+
+One cost to be aware of: if the elected job is sitting in its release delay when the timeout expires, recovery waits for it to come round, up to `release` seconds. That's why the strategy is opt-in.
 
 ---
 
@@ -610,6 +648,7 @@ Gate::define('viewFuse', function ($user = null) {
 - **State history** with timestamped transitions
 - **Live stats** — attempts, failures, failure rate per window
 - **Recovery info** — when the circuit opened and when it will test recovery
+- **Elected probe job** — which job will test recovery, when a service uses `OldestJobProbe`
 - **Auto-refresh** — polls the backend every 2 seconds (configurable)
 
 ---

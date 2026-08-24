@@ -4,6 +4,7 @@ namespace Harris21\Fuse;
 
 use Harris21\Fuse\Classifiers\DefaultFailureClassifier;
 use Harris21\Fuse\Contracts\FailureClassifier;
+use Harris21\Fuse\Contracts\JobAwareRecoveryStrategy;
 use Harris21\Fuse\Contracts\RecoveryStrategy;
 use Harris21\Fuse\Enums\CircuitState;
 use Harris21\Fuse\Events\CircuitBreakerClosed;
@@ -24,14 +25,22 @@ class CircuitBreaker
 
     private readonly int $windowSeconds;
 
+    private readonly int $releaseDelay;
+
+    private readonly int $probeLockTtl;
+
     private readonly string $cachePrefix;
 
     private readonly FailureClassifier $failureClassifier;
 
     private readonly RecoveryStrategy $recoveryStrategy;
 
-    public function __construct(private readonly string $serviceName, ?int $window = null)
-    {
+    public function __construct(
+        private readonly string $serviceName,
+        ?int $window = null,
+        ?int $release = null,
+        ?int $jobTimeout = null,
+    ) {
         $config = config("fuse.services.{$serviceName}", []);
 
         $this->failureThreshold = ThresholdCalculator::for($serviceName);
@@ -48,6 +57,21 @@ class CircuitBreaker
             ?? config('fuse.default_window', 60)
         ));
 
+        $this->releaseDelay = (int) ($release
+            ?? $config['release']
+            ?? config('fuse.default_release')
+            ?? 10);
+
+        $configuredProbeLockTtl = max(1, (int) (
+            $config['probe_lock_ttl']
+            ?? config('fuse.default_probe_lock_ttl')
+            ?? 65
+        ));
+
+        $this->probeLockTtl = $jobTimeout !== null && $jobTimeout > 0
+            ? max($configuredProbeLockTtl, $jobTimeout + 5)
+            : $configuredProbeLockTtl;
+
         $this->cachePrefix = config('fuse.cache.prefix', 'fuse');
 
         $this->failureClassifier = $this->resolveFailureClassifier($config);
@@ -58,6 +82,26 @@ class CircuitBreaker
     public function recoveryStrategy(): RecoveryStrategy
     {
         return $this->recoveryStrategy;
+    }
+
+    public function serviceName(): string
+    {
+        return $this->serviceName;
+    }
+
+    public function timeout(): int
+    {
+        return $this->timeout;
+    }
+
+    public function releaseDelay(): int
+    {
+        return $this->releaseDelay;
+    }
+
+    public function probeLockTtl(): int
+    {
+        return $this->probeLockTtl;
     }
 
     public function isOpen(): bool
@@ -71,7 +115,7 @@ class CircuitBreaker
         if ($openedAt && (time() - $openedAt) >= $this->timeout) {
             $this->transitionTo(CircuitState::HalfOpen);
 
-            return false;
+            return ! $this->isHalfOpen();
         }
 
         return true;
@@ -107,8 +151,8 @@ class CircuitBreaker
         }
 
         if ($this->getState() === CircuitState::HalfOpen) {
-            $this->recoveryStrategy->recordFailure($this);
             $this->transitionTo(CircuitState::Open, 100, 1, 1);
+            $this->recoveryStrategy->recordFailure($this);
 
             return;
         }
@@ -178,7 +222,7 @@ class CircuitBreaker
     }
 
     /**
-     * @return array{state: string, attempts: int, failures: int, failure_rate: float, opened_at: ?int, recovery_at: ?int, timeout: int, threshold: int, min_requests: int, window: int}
+     * @return array{state: string, attempts: int, failures: int, failure_rate: float, opened_at: ?int, recovery_at: ?int, timeout: int, threshold: int, min_requests: int, window: int, probe_candidate: array{uuid: string, created_at: int, name: string}|null}
      */
     public function getStats(): array
     {
@@ -199,6 +243,10 @@ class CircuitBreaker
             'threshold' => $this->failureThreshold,
             'min_requests' => $this->minRequests,
             'window' => $this->windowSeconds,
+            'probe_candidate' => $state !== CircuitState::Closed
+                && $this->recoveryStrategy instanceof JobAwareRecoveryStrategy
+                ? $this->recoveryStrategy->candidate($this)
+                : null,
         ];
     }
 
@@ -212,6 +260,10 @@ class CircuitBreaker
         Cache::forget($this->key("failures:{$window}"));
         Cache::lock($this->key('probe'))->forceRelease();
         Cache::lock($this->key('transition'))->forceRelease();
+
+        if ($this->recoveryStrategy instanceof JobAwareRecoveryStrategy) {
+            $this->recoveryStrategy->forgetCandidate($this);
+        }
     }
 
     /**
@@ -227,7 +279,13 @@ class CircuitBreaker
      */
     public function forceClose(): bool
     {
-        return $this->transitionTo(CircuitState::Closed);
+        $changed = $this->transitionTo(CircuitState::Closed);
+
+        if (! $changed && $this->isClosed()) {
+            $this->forgetCandidate();
+        }
+
+        return $changed;
     }
 
     private function transitionTo(
@@ -239,8 +297,14 @@ class CircuitBreaker
         $lock = Cache::lock($this->key('transition'), 5);
 
         $changed = (bool) $lock->get(function () use ($newState) {
-            if ($this->getState() === $newState) {
+            $currentState = $this->getState();
+
+            if ($currentState === $newState) {
                 return false;
+            }
+
+            if ($currentState === CircuitState::Closed && $newState === CircuitState::Open) {
+                $this->forgetCandidate();
             }
 
             Cache::put($this->key('state'), $newState->value);
@@ -251,6 +315,7 @@ class CircuitBreaker
 
             if ($newState === CircuitState::Closed) {
                 Cache::forget($this->key('opened_at'));
+                $this->forgetCandidate();
             }
 
             return true;
@@ -270,6 +335,19 @@ class CircuitBreaker
         }
 
         return $changed;
+    }
+
+    private function forgetCandidate(): void
+    {
+        if (! $this->recoveryStrategy instanceof JobAwareRecoveryStrategy) {
+            return;
+        }
+
+        try {
+            $this->recoveryStrategy->forgetCandidate($this);
+        } catch (Throwable $e) {
+            report($e);
+        }
     }
 
     private function incrementAttempts(): void

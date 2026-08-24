@@ -27,7 +27,10 @@ it('returns 200 when status page is enabled and gate allows', function () {
     config(['fuse.status_page.enabled' => true]);
     Gate::define('viewFuse', fn ($user = null) => true);
 
-    $this->get('/fuse')->assertSuccessful();
+    $this->get('/fuse')
+        ->assertSuccessful()
+        ->assertSee('Probe candidate')
+        ->assertSee('Elected probe');
 });
 
 it('returns 403 when gate denies access', function () {
@@ -49,8 +52,8 @@ it('returns json with all configured services', function () {
         ->assertOk()
         ->assertJsonStructure([
             'services' => [
-                'stripe' => ['state', 'attempts', 'failures', 'failure_rate', 'opened_at', 'recovery_at', 'timeout', 'threshold', 'min_requests', 'state_history'],
-                'mailgun' => ['state', 'attempts', 'failures', 'failure_rate', 'opened_at', 'recovery_at', 'timeout', 'threshold', 'min_requests', 'state_history'],
+                'stripe' => ['state', 'attempts', 'failures', 'failure_rate', 'opened_at', 'recovery_at', 'timeout', 'threshold', 'min_requests', 'probe_candidate', 'state_history'],
+                'mailgun' => ['state', 'attempts', 'failures', 'failure_rate', 'opened_at', 'recovery_at', 'timeout', 'threshold', 'min_requests', 'probe_candidate', 'state_history'],
             ],
             'circuit_breaker_enabled',
             'timestamp',
