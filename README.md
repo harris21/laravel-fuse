@@ -77,7 +77,7 @@ use Harris21\Fuse\Middleware\CircuitBreakerMiddleware;
 class ChargeCustomer implements ShouldQueue
 {
     public $tries = 0;           // Unlimited releases
-    public $maxExceptions = 3;   // Only real failures count
+    public $maxExceptions = 3;   // Unhandled exceptions before the job fails
 
     public function middleware(): array
     {
@@ -314,6 +314,54 @@ class CustomFailureClassifier implements FailureClassifier
 ```
 
 When no `failure_classifier` is configured, Fuse uses `DefaultFailureClassifier` which preserves the behavior described in the table above.
+
+### Rate-limited jobs and Retry-After
+
+The classifier keeps 429s from tripping the circuit, but that is all it does. The exception itself still reaches the worker, so a rate-limited job counts one of its `maxExceptions` and retries on its normal `backoff` (zero unless you set one). Three 429s in a row will fail a job that did nothing wrong, against an API that was up the whole time.
+
+Fuse leaves this alone on purpose. When to retry a rate-limited job, and how long to wait, is retry logic; the circuit breaker's only stake in a 429 is to not mistake it for an outage. Handle the retry side with a small job middleware that reads the delay the API already gave you:
+
+```php
+namespace App\Jobs\Middleware;
+
+use Illuminate\Http\Client\RequestException;
+
+class ReleasesRateLimitedJobs
+{
+    public function handle(mixed $job, callable $next): mixed
+    {
+        try {
+            return $next($job);
+        } catch (RequestException $e) {
+            if ($e->response->status() === 429) {
+                $delay = (int) $e->response->header('Retry-After') ?: 30;
+
+                return $job->release($delay);
+            }
+
+            throw $e;
+        }
+    }
+}
+```
+
+Because the middleware releases instead of rethrowing, the 429 no longer counts toward `maxExceptions` either. Note that `Retry-After` can also be an HTTP date rather than seconds; the cast falls back to 30 in that case, so parse the date form if your API sends it.
+
+List it before the circuit breaker so Fuse still sees and classifies the exception:
+
+```php
+public function middleware(): array
+{
+    return [
+        new ReleasesRateLimitedJobs,
+        new CircuitBreakerMiddleware('stripe'),
+    ];
+}
+```
+
+The order matters. Placed after `CircuitBreakerMiddleware`, the swallowed 429 looks like a success to the breaker, and a half-open circuit would close on a rate-limited probe.
+
+If you would rather stop the whole service when it is rate limited, a custom classifier that counts 429s does that: enough of them trip the circuit, and every job for that service is released without an HTTP call until the timeout expires. The delay is your `release` config rather than the header value, and the circuit reports it as an outage, so reach for this only when sustained throttling should be treated as one.
 
 ---
 
