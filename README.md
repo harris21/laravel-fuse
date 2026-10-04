@@ -681,6 +681,8 @@ Gate::define('viewFuse', function ($user = null) {
 });
 ```
 
+If you set `status_page.middleware`, your middleware replaces this gate check. Add `'can:viewFuse'` to the list to keep it. The `enabled` setting applies either way.
+
 ### Configuration
 
 ```php
@@ -689,7 +691,7 @@ Gate::define('viewFuse', function ($user = null) {
 'status_page' => [
     'enabled' => env('FUSE_STATUS_PAGE_ENABLED', false),
     'prefix' => env('FUSE_STATUS_PAGE_PREFIX', 'fuse'),
-    'middleware' => [],          // Custom middleware (replaces default)
+    'middleware' => [],          // Replaces the viewFuse check (see Authorization)
     'polling_interval' => 2,    // Frontend refresh interval in seconds
 ],
 ```

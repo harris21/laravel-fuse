@@ -95,7 +95,9 @@ return [
     |
     | - enabled: Toggle the status page on/off
     | - prefix: URL prefix for the status page routes
-    | - middleware: Additional middleware (replaces default StatusPageMiddleware)
+    | - middleware: Custom middleware. It replaces the viewFuse gate check, so
+    |   add your own authorization, for example 'can:viewFuse'. The enabled
+    |   toggle always applies.
     | - polling_interval: Frontend polling interval in seconds
     |
     | Authorization is handled by the 'viewFuse' gate. By default, only

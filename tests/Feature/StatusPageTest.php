@@ -1,6 +1,7 @@
 <?php
 
 use Harris21\Fuse\CircuitBreaker;
+use Illuminate\Auth\GenericUser;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Gate;
 
@@ -201,4 +202,40 @@ it('data endpoint also guarded by middleware', function () {
     config(['fuse.status_page.enabled' => false]);
 
     $this->getJson('/fuse/data')->assertNotFound();
+});
+
+it('returns 404 when the status page is disabled even with custom middleware', function () {
+    config(['fuse.status_page.enabled' => false]);
+    config(['fuse.status_page.middleware' => ['web']]);
+    require __DIR__.'/../../routes/web.php';
+
+    $this->get('/fuse')->assertNotFound();
+    $this->getJson('/fuse/data')->assertNotFound();
+});
+
+it('lets custom middleware replace the viewFuse gate', function () {
+    config(['fuse.status_page.enabled' => true]);
+    config(['fuse.status_page.middleware' => ['web']]);
+    Gate::define('viewFuse', fn ($user = null) => false);
+    require __DIR__.'/../../routes/web.php';
+
+    $this->get('/fuse')->assertSuccessful();
+});
+
+it('enforces the viewFuse gate when custom middleware includes it', function () {
+    config(['fuse.status_page.enabled' => true]);
+    config(['fuse.status_page.middleware' => ['web', 'can:viewFuse']]);
+    Gate::define('viewFuse', fn ($user = null) => false);
+    require __DIR__.'/../../routes/web.php';
+
+    $this->get('/fuse')->assertForbidden();
+});
+
+it('returns 404 to a signed-in user when the status page is disabled behind auth middleware', function () {
+    config(['fuse.status_page.enabled' => false]);
+    config(['fuse.status_page.middleware' => ['web', 'auth']]);
+    require __DIR__.'/../../routes/web.php';
+
+    $this->actingAs(new GenericUser(['id' => 1]))->get('/fuse')->assertNotFound();
+    $this->actingAs(new GenericUser(['id' => 1]))->getJson('/fuse/data')->assertNotFound();
 });
