@@ -8,8 +8,8 @@ class StateHistoryTracker
 {
     public function track(string $service, string $currentState): void
     {
-        $lastStateKey = "fuse:status:last_state:{$service}";
-        $historyKey = "fuse:status:history:{$service}";
+        $lastStateKey = $this->key("last_state:{$service}");
+        $historyKey = $this->key("history:{$service}");
 
         $lastState = Cache::get($lastStateKey);
 
@@ -35,6 +35,13 @@ class StateHistoryTracker
      */
     public function getHistory(string $service): array
     {
-        return Cache::get("fuse:status:history:{$service}", []);
+        return Cache::get($this->key("history:{$service}"), []);
+    }
+
+    private function key(string $suffix): string
+    {
+        $prefix = config('fuse.cache.prefix', 'fuse');
+
+        return "{$prefix}:status:{$suffix}";
     }
 }

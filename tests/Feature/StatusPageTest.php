@@ -104,6 +104,27 @@ it('tracks state history across sequential requests', function () {
     expect($history[0]['to'])->toBe('open');
 });
 
+it('keeps state history separate per cache prefix', function () {
+    config(['fuse.status_page.enabled' => true]);
+    Gate::define('viewFuse', fn ($user = null) => true);
+    config(['fuse.services' => [
+        'stripe' => ['threshold' => 50, 'timeout' => 60, 'min_requests' => 5],
+    ]]);
+
+    config(['fuse.cache.prefix' => 'app1']);
+    $this->getJson('/fuse/data')->assertOk();
+    (new CircuitBreaker('stripe'))->forceOpen();
+    $this->getJson('/fuse/data')
+        ->assertOk()
+        ->assertJsonCount(1, 'services.stripe.state_history');
+
+    config(['fuse.cache.prefix' => 'app2']);
+    $this->getJson('/fuse/data')
+        ->assertOk()
+        ->assertJsonPath('services.stripe.state', 'closed')
+        ->assertJsonCount(0, 'services.stripe.state_history');
+});
+
 it('returns circuit_breaker_enabled from cache override', function () {
     config(['fuse.status_page.enabled' => true]);
     Gate::define('viewFuse', fn ($user = null) => true);
