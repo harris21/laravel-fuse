@@ -41,7 +41,7 @@ class CircuitBreaker
         ?int $release = null,
         ?int $jobTimeout = null,
     ) {
-        $config = config("fuse.services.{$serviceName}", []);
+        $config = config('fuse.services', [])[$serviceName] ?? [];
 
         $this->failureThreshold = ThresholdCalculator::for($serviceName);
 
@@ -112,7 +112,7 @@ class CircuitBreaker
 
         $openedAt = Cache::get($this->key('opened_at'));
 
-        if ($openedAt && (time() - $openedAt) >= $this->timeout) {
+        if ($openedAt !== null && (now()->getTimestamp() - $openedAt) >= $this->timeout) {
             $this->transitionTo(CircuitState::HalfOpen);
 
             return ! $this->isHalfOpen();
@@ -133,12 +133,22 @@ class CircuitBreaker
 
     public function recordSuccess(): void
     {
-        $this->incrementAttempts();
+        $countingError = null;
+
+        try {
+            $this->incrementAttempts();
+        } catch (Throwable $e) {
+            $countingError = $e;
+        }
 
         if ($this->getState() === CircuitState::HalfOpen) {
             if ($this->recoveryStrategy->recordSuccess($this)) {
                 $this->transitionTo(CircuitState::Closed);
             }
+        }
+
+        if ($countingError !== null) {
+            throw $countingError;
         }
     }
 
@@ -238,7 +248,7 @@ class CircuitBreaker
             'failures' => $failures,
             'failure_rate' => $attempts > 0 ? round(($failures / $attempts) * 100, 1) : 0,
             'opened_at' => $openedAt,
-            'recovery_at' => $openedAt ? (int) $openedAt + $this->timeout : null,
+            'recovery_at' => $openedAt !== null ? (int) $openedAt + $this->timeout : null,
             'timeout' => $this->timeout,
             'threshold' => $this->failureThreshold,
             'min_requests' => $this->minRequests,
@@ -310,7 +320,7 @@ class CircuitBreaker
             Cache::put($this->key('state'), $newState->value);
 
             if ($newState === CircuitState::Open) {
-                Cache::put($this->key('opened_at'), time());
+                Cache::put($this->key('opened_at'), now()->getTimestamp());
             }
 
             if ($newState === CircuitState::Closed) {
@@ -322,19 +332,34 @@ class CircuitBreaker
         });
 
         if ($changed) {
-            match ($newState) {
-                CircuitState::Open => event(new CircuitBreakerOpened(
-                    $this->serviceName,
-                    $failureRate,
-                    $attempts,
-                    $failures
-                )),
-                CircuitState::HalfOpen => event(new CircuitBreakerHalfOpen($this->serviceName)),
-                CircuitState::Closed => event(new CircuitBreakerClosed($this->serviceName)),
-            };
+            try {
+                event(match ($newState) {
+                    CircuitState::Open => new CircuitBreakerOpened(
+                        $this->serviceName,
+                        $failureRate,
+                        $attempts,
+                        $failures
+                    ),
+                    CircuitState::HalfOpen => new CircuitBreakerHalfOpen($this->serviceName),
+                    CircuitState::Closed => new CircuitBreakerClosed($this->serviceName),
+                });
+            } catch (Throwable $e) {
+                $this->reportWithoutThrowing($e);
+            }
         }
 
         return $changed;
+    }
+
+    /**
+     * The transition has already happened, so a reporter that throws must not stop it from finishing.
+     */
+    private function reportWithoutThrowing(Throwable $e): void
+    {
+        try {
+            report($e);
+        } catch (Throwable) {
+        }
     }
 
     private function forgetCandidate(): void

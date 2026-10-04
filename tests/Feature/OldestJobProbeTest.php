@@ -10,6 +10,15 @@ use Illuminate\Contracts\Queue\Job;
 use Illuminate\Queue\Events\JobFailed;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Config;
+use Illuminate\Support\Facades\Exceptions;
+
+class CandidateStoreThatThrows extends OldestJobProbe
+{
+    public function observeHeldJob(CircuitBreaker $breaker, HeldJob $job): void
+    {
+        throw new RuntimeException('candidate store down');
+    }
+}
 
 beforeEach(function () {
     Cache::flush();
@@ -75,6 +84,28 @@ it('keeps the first-seen job on a same-second tie', function () {
     $middleware->handle(makeQueuedJob('second', 1000), fn () => 'success');
 
     expect(candidateFor()['uuid'])->toBe('first');
+});
+
+it('releases a held job when the strategy cannot record it', function () {
+    Exceptions::fake();
+    config(['fuse.services.test-service.recovery_strategy' => CandidateStoreThatThrows::class]);
+    tripOpen();
+    $job = makeQueuedJob('older');
+
+    $result = (new CircuitBreakerMiddleware('test-service'))->handle($job, fn () => 'charged');
+
+    expect($result)->toBe('released')
+        ->and($job->released)->toBeTrue();
+    Exceptions::assertReported(fn (RuntimeException $e) => $e->getMessage() === 'candidate store down');
+});
+
+it('dates a held job without a createdAt by the Carbon clock', function () {
+    Carbon::setTestNow('2026-01-01 12:00:00');
+    $queueJob = Mockery::mock(Job::class);
+    $queueJob->shouldReceive('uuid')->andReturn('legacy');
+    $queueJob->shouldReceive('payload')->andReturn(['uuid' => 'legacy', 'displayName' => 'App\\Jobs\\ChargeCustomer']);
+
+    expect(HeldJob::fromQueueJob($queueJob)->createdAt)->toBe(now()->getTimestamp());
 });
 
 it('uses the middleware release override for the candidate ttl', function () {
@@ -177,7 +208,7 @@ it('keeps the same job as the probe after a failed probe', function () {
     $middleware = new CircuitBreakerMiddleware('test-service');
     $middleware->handle(makeQueuedJob('older', 1000), fn () => 'success');
 
-    sleep(2);
+    Carbon::setTestNow(now()->addSeconds(2));
     config(['fuse.default_timeout' => 1]);
     (new CircuitBreaker('test-service'))->isOpen();
     expect((new CircuitBreaker('test-service'))->isHalfOpen())->toBeTrue();
@@ -204,6 +235,21 @@ it('clears the candidate and closes the circuit when the probe succeeds', functi
     expect((new CircuitBreaker('test-service'))->isClosed())->toBeTrue();
     expect(candidateFor())->toBeNull();
     expect(Cache::get('fuse:probe-candidate:older'))->toBeNull();
+});
+
+it('clears the candidate and closes the circuit when counting the successful probe fails', function () {
+    Exceptions::fake();
+    useCacheThatCannotIncrement();
+    forceHalfOpen();
+    Cache::put('fuse:test-service:probe-candidate', ['uuid' => 'older', 'created_at' => 1000, 'name' => 'A'], 60);
+    Cache::put('fuse:probe-candidate:older', 'test-service', 60);
+
+    $result = (new CircuitBreakerMiddleware('test-service'))->handle(makeQueuedJob('older', 1000), fn () => 'success');
+
+    expect($result)->toBe('success');
+    expect((new CircuitBreaker('test-service'))->isClosed())->toBeTrue();
+    expect(candidateFor())->toBeNull();
+    Exceptions::assertReported(fn (RuntimeException $e) => $e->getMessage() === 'cache increment failed');
 });
 
 it('clears the candidate when the circuit is force closed', function () {

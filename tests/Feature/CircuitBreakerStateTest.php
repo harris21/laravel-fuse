@@ -3,6 +3,7 @@
 use Carbon\Carbon;
 use Harris21\Fuse\CircuitBreaker;
 use Harris21\Fuse\Contracts\JobAwareRecoveryStrategy;
+use Harris21\Fuse\Contracts\RecoveryStrategy;
 use Harris21\Fuse\Enums\CircuitState;
 use Harris21\Fuse\HeldJob;
 use Illuminate\Support\Facades\Cache;
@@ -112,10 +113,34 @@ it('transitions to half-open after timeout', function () {
 
     expect($breaker->isOpen())->toBeTrue();
 
-    sleep(2);
+    Carbon::setTestNow(now()->addSeconds(2));
 
     expect($breaker->isOpen())->toBeFalse();
     expect($breaker->isHalfOpen())->toBeTrue();
+});
+
+it('times the open circuit by the Carbon clock', function () {
+    $breaker = new CircuitBreaker('test-service');
+    $breaker->forceOpen();
+
+    Carbon::setTestNow(now()->addSeconds(59));
+    expect($breaker->isOpen())->toBeTrue();
+
+    Carbon::setTestNow(now()->addSecond());
+    expect($breaker->isOpen())->toBeFalse()
+        ->and($breaker->isHalfOpen())->toBeTrue();
+});
+
+it('recovers a circuit opened at the Unix epoch', function () {
+    Carbon::setTestNow(Carbon::createFromTimestamp(0));
+    $breaker = new CircuitBreaker('test-service');
+    $breaker->forceOpen();
+
+    expect($breaker->getStats()['recovery_at'])->toBe(60);
+
+    Carbon::setTestNow(now()->addSeconds(60));
+    expect($breaker->isOpen())->toBeFalse()
+        ->and($breaker->isHalfOpen())->toBeTrue();
 });
 
 it('transitions to closed on success in half-open state', function () {
@@ -127,7 +152,7 @@ it('transitions to closed on success in half-open state', function () {
         $breaker->recordFailure();
     }
 
-    sleep(2);
+    Carbon::setTestNow(now()->addSeconds(2));
     $breaker->isOpen();
 
     expect($breaker->isHalfOpen())->toBeTrue();
@@ -154,7 +179,7 @@ it('keeps a successful half-open probe closed when candidate cleanup fails', fun
 
     $breaker = new CircuitBreaker('test-service');
     $breaker->forceOpen();
-    Cache::put($breaker->key('opened_at'), time() - 61);
+    Cache::put($breaker->key('opened_at'), now()->getTimestamp() - 61);
     $breaker->isOpen();
 
     expect($breaker->isHalfOpen())->toBeTrue();
@@ -210,6 +235,42 @@ it('cleans a closed-state candidate before publishing the open state', function 
         ->and($breaker->isOpen())->toBeTrue();
 });
 
+it('counts a successful probe before the recovery strategy sees it', function () {
+    $strategy = new class implements RecoveryStrategy
+    {
+        public ?int $attemptsSeen = null;
+
+        public function allowsAttempt(CircuitBreaker $breaker): bool
+        {
+            return true;
+        }
+
+        public function recordSuccess(CircuitBreaker $breaker): bool
+        {
+            $this->attemptsSeen = $breaker->getStats()['attempts'];
+
+            return true;
+        }
+
+        public function recordFailure(CircuitBreaker $breaker): void {}
+    };
+
+    app()->instance('counting-strategy', $strategy);
+    config(['fuse.services.test-service.recovery_strategy' => 'counting-strategy']);
+
+    forceHalfOpen()->recordSuccess();
+
+    expect($strategy->attemptsSeen)->toBe(1);
+});
+
+it('finishes a successful probe before rethrowing a counting error', function () {
+    useCacheThatCannotIncrement();
+    $breaker = forceHalfOpen();
+
+    expect(fn () => $breaker->recordSuccess())->toThrow(RuntimeException::class, 'cache increment failed');
+    expect($breaker->isClosed())->toBeTrue();
+});
+
 it('transitions back to open on failure in half-open state', function () {
     config(['fuse.services.test-service.timeout' => 1]);
 
@@ -219,7 +280,7 @@ it('transitions back to open on failure in half-open state', function () {
         $breaker->recordFailure();
     }
 
-    sleep(2);
+    Carbon::setTestNow(now()->addSeconds(2));
     $breaker->isOpen();
 
     expect($breaker->isHalfOpen())->toBeTrue();
@@ -278,6 +339,20 @@ it('uses service-specific config', function () {
 
     $breaker = new CircuitBreaker('stripe');
     $stats = $breaker->getStats();
+
+    expect($stats['threshold'])->toBe(30);
+    expect($stats['timeout'])->toBe(120);
+    expect($stats['min_requests'])->toBe(3);
+});
+
+it('uses service-specific config for a service whose name contains a dot', function () {
+    config(['fuse.services' => ['payments.stripe' => [
+        'threshold' => 30,
+        'timeout' => 120,
+        'min_requests' => 3,
+    ]]]);
+
+    $stats = (new CircuitBreaker('payments.stripe'))->getStats();
 
     expect($stats['threshold'])->toBe(30);
     expect($stats['timeout'])->toBe(120);
@@ -412,6 +487,22 @@ it('trips at different thresholds based on time of day', function () {
     expect($offPeakBreaker->isOpen())->toBeTrue();
 });
 
+it('trips at the default threshold for a configured service without one', function () {
+    config(['fuse.default_threshold' => 30]);
+    config(['fuse.services.mailgun' => ['timeout' => 30, 'min_requests' => 10]]);
+
+    $breaker = new CircuitBreaker('mailgun');
+
+    for ($i = 0; $i < 7; $i++) {
+        $breaker->recordSuccess();
+    }
+    for ($i = 0; $i < 3; $i++) {
+        $breaker->recordFailure();
+    }
+
+    expect($breaker->getState())->toBe(CircuitState::Open);
+});
+
 it('uses a 60-second default window when none configured', function () {
     $breaker = new CircuitBreaker('test-service');
 
@@ -511,7 +602,7 @@ it('stays open for a worker that loses the half-open transition lock', function 
         $breaker->recordFailure();
     }
 
-    sleep(2);
+    Carbon::setTestNow(now()->addSeconds(2));
 
     $transition = Cache::lock($breaker->key('transition'), 5);
     expect($transition->get())->toBeTrue();

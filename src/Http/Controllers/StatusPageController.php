@@ -7,24 +7,63 @@ use Harris21\Fuse\Services\StateHistoryTracker;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\View\View;
+use Throwable;
 
 class StatusPageController
 {
     public function index(): View
     {
+        $status = $this->readStatus();
+
         return view('fuse::status', [
-            'initialData' => $this->buildServiceData(),
+            'initialData' => $status['services'] ?? [],
+            'circuitBreakerEnabled' => $status['enabled'] ?? false,
+            'dataAvailable' => $status !== null,
             'pollingInterval' => config('fuse.status_page.polling_interval', 2),
         ]);
     }
 
     public function data(): JsonResponse
     {
+        $status = $this->readStatus();
+
+        if ($status === null) {
+            return response()->json(['message' => 'Circuit data is unavailable.'], 503);
+        }
+
         return response()->json([
-            'services' => $this->buildServiceData(),
-            'circuit_breaker_enabled' => $this->isEnabled(),
+            'services' => $status['services'],
+            'circuit_breaker_enabled' => $status['enabled'],
             'timestamp' => now()->format('H:i:s'),
         ]);
+    }
+
+    /**
+     * @return array{services: array<array-key, array<string, mixed>>, enabled: bool}|null
+     */
+    private function readStatus(): ?array
+    {
+        try {
+            return [
+                'services' => $this->buildServiceData(),
+                'enabled' => $this->isEnabled(),
+            ];
+        } catch (Throwable $e) {
+            $this->reportWithoutThrowing($e);
+
+            return null;
+        }
+    }
+
+    /**
+     * A reporter that throws must not replace the outage response.
+     */
+    private function reportWithoutThrowing(Throwable $e): void
+    {
+        try {
+            report($e);
+        } catch (Throwable) {
+        }
     }
 
     /**
@@ -53,7 +92,8 @@ class StatusPageController
 
     private function isEnabled(): bool
     {
-        $cacheValue = Cache::get('fuse:enabled');
+        $prefix = config('fuse.cache.prefix', 'fuse');
+        $cacheValue = Cache::get("{$prefix}:enabled");
 
         if ($cacheValue !== null) {
             return (bool) $cacheValue;

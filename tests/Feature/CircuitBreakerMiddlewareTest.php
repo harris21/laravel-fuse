@@ -1,8 +1,24 @@
 <?php
 
+use Carbon\Carbon;
 use Harris21\Fuse\CircuitBreaker;
+use Harris21\Fuse\Events\CircuitBreakerClosed;
+use Harris21\Fuse\Events\CircuitBreakerHalfOpen;
+use Harris21\Fuse\Events\CircuitBreakerOpened;
 use Harris21\Fuse\Middleware\CircuitBreakerMiddleware;
+use Harris21\Fuse\Strategies\SingleProbe;
+use Illuminate\Queue\Jobs\SyncJob;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Exceptions;
+
+class ProbeGateThatThrows extends SingleProbe
+{
+    public function allowsAttempt(CircuitBreaker $breaker): bool
+    {
+        throw new RuntimeException('probe lock unavailable');
+    }
+}
 
 beforeEach(function () {
     Cache::flush();
@@ -319,7 +335,7 @@ it('executes probe and closes circuit on success in half-open state', function (
 
     expect($breaker->isOpen())->toBeTrue();
 
-    sleep(2);
+    Carbon::setTestNow(now()->addSeconds(2));
 
     $breaker->isOpen();
     expect($breaker->isHalfOpen())->toBeTrue();
@@ -352,7 +368,7 @@ it('reopens circuit on failure in half-open state', function () {
         $breaker->recordFailure();
     }
 
-    sleep(2);
+    Carbon::setTestNow(now()->addSeconds(2));
     $breaker->isOpen();
     expect($breaker->isHalfOpen())->toBeTrue();
 
@@ -381,7 +397,7 @@ it('releases non-probe workers in half-open state', function () {
         $breaker->recordFailure();
     }
 
-    sleep(2);
+    Carbon::setTestNow(now()->addSeconds(2));
     $breaker->isOpen();
     expect($breaker->isHalfOpen())->toBeTrue();
     $prefix = config('fuse.cache.prefix');
@@ -418,4 +434,191 @@ it('releases non-probe workers in half-open state', function () {
     expect($result)->toBe('released');
 
     $probeLock->forceRelease();
+});
+
+it('runs the probe when a CircuitBreakerHalfOpen listener throws', function () {
+    Exceptions::fake();
+    $breaker = new CircuitBreaker('test-service');
+    $breaker->forceOpen();
+    Cache::put($breaker->key('opened_at'), now()->getTimestamp() - $breaker->timeout() - 1);
+    Event::listen(CircuitBreakerHalfOpen::class, fn () => throw new RuntimeException('listener down'));
+
+    $calls = 0;
+    $result = (new CircuitBreakerMiddleware('test-service'))->handle(makeJob(), function () use (&$calls) {
+        $calls++;
+
+        return 'charged';
+    });
+
+    expect($result)->toBe('charged');
+    expect($calls)->toBe(1);
+    expect($breaker->isClosed())->toBeTrue();
+    Exceptions::assertReported(fn (RuntimeException $e) => $e->getMessage() === 'listener down');
+});
+
+it('does not fail a successful probe when a CircuitBreakerClosed listener throws', function () {
+    Exceptions::fake();
+    $breaker = forceHalfOpen();
+    Event::listen(CircuitBreakerClosed::class, fn () => throw new RuntimeException('listener down'));
+
+    $calls = 0;
+    $result = (new CircuitBreakerMiddleware('test-service'))->handle(makeJob(), function () use (&$calls) {
+        $calls++;
+
+        return 'charged';
+    });
+
+    expect($result)->toBe('charged');
+    expect($calls)->toBe(1);
+    expect($breaker->isClosed())->toBeTrue();
+    expect($breaker->getStats()['failures'])->toBe(0);
+    Exceptions::assertReported(fn (RuntimeException $e) => $e->getMessage() === 'listener down');
+});
+
+it('rethrows the job exception when a CircuitBreakerOpened listener throws', function () {
+    Exceptions::fake();
+    config(['fuse.default_min_requests' => 1]);
+    Event::listen(CircuitBreakerOpened::class, fn () => throw new RuntimeException('listener down'));
+
+    expect(fn () => (new CircuitBreakerMiddleware('test-service'))->handle(makeJob(), function () {
+        throw new RuntimeException('stripe timeout');
+    }))->toThrow(RuntimeException::class, 'stripe timeout');
+
+    expect((new CircuitBreaker('test-service'))->isOpen())->toBeTrue();
+    Exceptions::assertReported(fn (RuntimeException $e) => $e->getMessage() === 'listener down');
+});
+
+it('keeps a successful job successful when the cache cannot record it', function (bool $probing) {
+    Exceptions::fake();
+    useCacheThatCannotIncrement();
+
+    if ($probing) {
+        forceHalfOpen();
+    }
+
+    $calls = 0;
+    $result = (new CircuitBreakerMiddleware('test-service'))->handle(makeJob(), function () use (&$calls) {
+        $calls++;
+
+        return 'charged';
+    });
+
+    expect($result)->toBe('charged');
+    expect($calls)->toBe(1);
+    Exceptions::assertReported(fn (RuntimeException $e) => $e->getMessage() === 'cache increment failed');
+})->with([
+    'closed circuit' => false,
+    'half-open probe' => true,
+]);
+
+it('rethrows the job exception when the cache cannot record the failure', function () {
+    Exceptions::fake();
+    useCacheThatCannotIncrement();
+
+    expect(fn () => (new CircuitBreakerMiddleware('test-service'))->handle(makeJob(), function () {
+        throw new RuntimeException('stripe timeout');
+    }))->toThrow(RuntimeException::class, 'stripe timeout');
+
+    Exceptions::assertReported(fn (RuntimeException $e) => $e->getMessage() === 'cache increment failed');
+});
+
+it('closes the circuit after a successful probe even when the cache cannot count it', function () {
+    Exceptions::fake();
+    useCacheThatCannotIncrement();
+    $breaker = forceHalfOpen();
+
+    $result = (new CircuitBreakerMiddleware('test-service'))->handle(makeJob(), fn () => 'charged');
+
+    expect($result)->toBe('charged');
+    expect($breaker->isClosed())->toBeTrue();
+    expect(Cache::lock($breaker->key('probe'), 5)->get())->toBeTrue();
+    Exceptions::assertReported(fn (RuntimeException $e) => $e->getMessage() === 'cache increment failed');
+});
+
+it('keeps a successful job successful when reporting a bookkeeping error fails', function () {
+    useCacheThatCannotIncrement();
+    Exceptions::reportable(fn (RuntimeException $e) => throw new LogicException('reporter down'));
+
+    $calls = 0;
+    $result = (new CircuitBreakerMiddleware('test-service'))->handle(makeJob(), function () use (&$calls) {
+        $calls++;
+
+        return 'charged';
+    });
+
+    expect($result)->toBe('charged');
+    expect($calls)->toBe(1);
+});
+
+it('rethrows the job exception when reporting a bookkeeping error fails', function () {
+    useCacheThatCannotIncrement();
+    Exceptions::reportable(fn (RuntimeException $e) => throw new LogicException('reporter down'));
+
+    expect(fn () => (new CircuitBreakerMiddleware('test-service'))->handle(makeJob(), function () {
+        throw new RuntimeException('stripe timeout');
+    }))->toThrow(RuntimeException::class, 'stripe timeout');
+});
+
+it('releases the job when the cache is down', function () {
+    Exceptions::fake();
+    useCacheThatIsDown();
+    $job = makeJob();
+
+    $result = (new CircuitBreakerMiddleware('test-service'))->handle($job, function ($job) {
+        $job->handled = true;
+
+        return 'charged';
+    });
+
+    expect($result)->toBe('released')
+        ->and($job->handled)->toBeFalse()
+        ->and($job->releaseDelay)->toBe(10);
+    Exceptions::assertReported(fn (RuntimeException $e) => $e->getMessage() === 'cache unreachable');
+});
+
+it('releases the job when the cache is down and reporting fails', function () {
+    useCacheThatIsDown();
+    Exceptions::reportable(fn (RuntimeException $e) => throw new LogicException('reporter down'));
+
+    $result = (new CircuitBreakerMiddleware('test-service'))->handle(makeJob(), fn () => 'charged');
+
+    expect($result)->toBe('released');
+});
+
+it('follows the config switch when the cache is down', function () {
+    Exceptions::fake();
+    config(['fuse.enabled' => false]);
+    useCacheThatIsDown();
+
+    $result = (new CircuitBreakerMiddleware('test-service'))->handle(makeJob(), fn () => 'charged');
+
+    expect($result)->toBe('charged');
+    Exceptions::assertReported(fn (RuntimeException $e) => $e->getMessage() === 'cache unreachable');
+});
+
+it('releases the job when the recovery strategy fails to admit a probe', function () {
+    Exceptions::fake();
+    config(['fuse.services.test-service.recovery_strategy' => ProbeGateThatThrows::class]);
+    forceHalfOpen();
+    $job = makeJob();
+
+    $result = (new CircuitBreakerMiddleware('test-service'))->handle($job, function ($job) {
+        $job->handled = true;
+
+        return 'charged';
+    });
+
+    expect($result)->toBe('released')
+        ->and($job->handled)->toBeFalse();
+    Exceptions::assertReported(fn (RuntimeException $e) => $e->getMessage() === 'probe lock unavailable');
+});
+
+it('rethrows on the sync driver when Fuse cannot check the circuit', function () {
+    useCacheThatIsDown();
+    $job = makeJob();
+    $job->job = new SyncJob(app(), '{}', 'sync', 'sync');
+
+    expect(fn () => (new CircuitBreakerMiddleware('test-service'))->handle($job, fn () => 'charged'))
+        ->toThrow(RuntimeException::class, 'cache unreachable');
+    expect($job->released)->toBeFalse();
 });

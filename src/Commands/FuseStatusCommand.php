@@ -182,7 +182,7 @@ class FuseStatusCommand extends Command
         }
 
         $name = class_basename($candidate['name']);
-        $age = max(0, time() - $candidate['created_at']);
+        $age = max(0, now()->getTimestamp() - $candidate['created_at']);
 
         return "{$name} ({$age}s old)";
     }

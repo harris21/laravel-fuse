@@ -1,6 +1,7 @@
 <?php
 
 use Harris21\Fuse\Http\Controllers\StatusPageController;
+use Harris21\Fuse\Http\Middleware\EnsureStatusPageIsEnabled;
 use Harris21\Fuse\Http\Middleware\StatusPageMiddleware;
 use Illuminate\Support\Facades\Route;
 
@@ -12,7 +13,7 @@ $middleware = ['web'];
 if (empty($configuredMiddleware)) {
     $middleware[] = StatusPageMiddleware::class;
 } else {
-    $middleware = array_merge($middleware, $configuredMiddleware);
+    $middleware = array_merge($middleware, [EnsureStatusPageIsEnabled::class], $configuredMiddleware);
 }
 
 Route::middleware($middleware)

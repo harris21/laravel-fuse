@@ -1,5 +1,6 @@
 <?php
 
+use Carbon\Carbon;
 use Harris21\Fuse\CircuitBreaker;
 use Harris21\Fuse\Events\CircuitBreakerClosed;
 use Harris21\Fuse\Events\CircuitBreakerOpened;
@@ -187,7 +188,7 @@ it('still recovers automatically after the timeout when the circuit was manually
     $breaker = new CircuitBreaker('stripe');
     expect($breaker->isOpen())->toBeTrue();
 
-    sleep(2);
+    Carbon::setTestNow(now()->addSeconds(2));
 
     expect($breaker->isOpen())->toBeFalse()
         ->and($breaker->isHalfOpen())->toBeTrue();
@@ -285,5 +286,18 @@ it('shows the elected probe job in the fuse:status table', function () {
     $this->artisan('fuse:status')
         ->expectsOutputToContain('Probe')
         ->expectsOutputToContain('ChargeCustomer')
+        ->assertExitCode(0);
+});
+
+it('measures the probe job age by the Carbon clock', function () {
+    config(['fuse.services' => [
+        'stripe' => ['threshold' => 50, 'timeout' => 30, 'min_requests' => 5, 'recovery_strategy' => OldestJobProbe::class],
+    ]]);
+    Carbon::setTestNow('2026-01-01 12:00:00');
+    (new CircuitBreaker('stripe'))->forceOpen();
+    Cache::put('fuse:stripe:probe-candidate', ['uuid' => 'abc-123', 'created_at' => now()->getTimestamp() - 30, 'name' => 'App\\Jobs\\ChargeCustomer'], 60);
+
+    $this->artisan('fuse:status')
+        ->expectsOutputToContain('ChargeCustomer (30s old)')
         ->assertExitCode(0);
 });

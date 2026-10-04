@@ -351,8 +351,8 @@
         <div class="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
             <div class="flex items-center gap-4">
                 <div class="flex items-center gap-2">
-                    <div class="status-indicator dark:bg-neon-cyan bg-day-cyan"></div>
-                    <span class="font-mono dark:text-neon-cyan text-day-cyan text-sm tracking-wider">LIVE MONITORING</span>
+                    <div id="live-indicator" class="status-indicator dark:bg-neon-cyan bg-day-cyan"></div>
+                    <span id="live-label" class="font-mono dark:text-neon-cyan text-day-cyan text-sm tracking-wider">LIVE MONITORING</span>
                 </div>
             </div>
             <h1 class="font-display font-bold text-2xl tracking-tight">
@@ -520,6 +520,7 @@
         const DATA_URL = document.querySelector('meta[name="fuse-data-url"]').content;
         const POLL_INTERVAL = {{ $pollingInterval }} * 1000;
         const initialData = @json($initialData);
+        const dataAvailable = @json($dataAvailable);
 
         let selectedService = null;
         let servicesData = {};
@@ -751,7 +752,20 @@
             renderServiceBadges(servicesData);
         }
 
+        function setLive(live) {
+            document.getElementById('live-indicator').className = `status-indicator ${
+                live ? 'dark:bg-neon-cyan bg-day-cyan' : 'dark:bg-neon-red bg-day-red'
+            }`;
+
+            const label = document.getElementById('live-label');
+            label.className = `font-mono text-sm tracking-wider ${
+                live ? 'dark:text-neon-cyan text-day-cyan' : 'dark:text-neon-red text-day-red'
+            }`;
+            label.textContent = live ? 'LIVE MONITORING' : 'DATA UNAVAILABLE';
+        }
+
         function render(services, enabled, timestamp) {
+            setLive(true);
             servicesData = services;
             const serviceNames = Object.keys(services);
 
@@ -795,17 +809,24 @@
         });
 
         // Initial render
-        render(initialData, true, new Date().toLocaleTimeString('en-GB', { hour12: false }));
+        if (dataAvailable) {
+            render(initialData, @json($circuitBreakerEnabled), new Date().toLocaleTimeString('en-GB', { hour12: false }));
+        } else {
+            setLive(false);
+        }
 
         // Polling
         setInterval(async () => {
             try {
                 const response = await fetch(DATA_URL);
-                if (!response.ok) return;
+                if (!response.ok) {
+                    setLive(false);
+                    return;
+                }
                 const data = await response.json();
                 render(data.services, data.circuit_breaker_enabled, data.timestamp);
             } catch (error) {
-                // Silently ignore polling errors
+                setLive(false);
             }
         }, POLL_INTERVAL);
     </script>

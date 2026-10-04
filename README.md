@@ -51,6 +51,8 @@ When Stripe goes down at 11 PM, your queue workers don't know. They keep trying 
 
 **HALF-OPEN** — Testing recovery. After the timeout period, one probe request tests if the service recovered. Success closes the circuit. Failure reopens it. If you need to, you may [customize the probe request](#recovery-strategies).
 
+If a cache call fails while Fuse decides whether a job may run, for example on a timeout, the middleware reports the error and releases the job with its `release` delay, so that error does not count toward the job's `maxExceptions`. If the kill switch can't be read, Fuse reports that too and goes by `fuse.enabled`. On the `sync` driver, where a release would drop the job, the error is thrown as before.
+
 ---
 
 ## Installation
@@ -205,6 +207,10 @@ Configure different thresholds for business hours when every transaction matters
 ```
 
 During peak hours (9 AM - 5 PM), the circuit uses the higher threshold to maximize successful transactions. Outside peak hours, it uses the lower threshold for earlier protection.
+
+Without `peak_hours_threshold`, a service uses its `threshold` (or `default_threshold` when it sets none) at every hour of the day.
+
+A peak window can cross midnight: `'peak_hours_start' => 22` with `'peak_hours_end' => 6` covers 22:00 to 06:59. Both hours are inclusive, so an end of 17 lasts until 17:59.
 
 ---
 
@@ -677,6 +683,8 @@ Gate::define('viewFuse', function ($user = null) {
 });
 ```
 
+If you set `status_page.middleware`, your middleware replaces this gate check. Add `'can:viewFuse'` to the list to keep it. The `enabled` setting applies either way.
+
 ### Configuration
 
 ```php
@@ -685,7 +693,7 @@ Gate::define('viewFuse', function ($user = null) {
 'status_page' => [
     'enabled' => env('FUSE_STATUS_PAGE_ENABLED', false),
     'prefix' => env('FUSE_STATUS_PAGE_PREFIX', 'fuse'),
-    'middleware' => [],          // Custom middleware (replaces default)
+    'middleware' => [],          // Replaces the viewFuse check (see Authorization)
     'polling_interval' => 2,    // Frontend refresh interval in seconds
 ],
 ```

@@ -1,7 +1,9 @@
 <?php
 
 use Harris21\Fuse\CircuitBreaker;
+use Illuminate\Auth\GenericUser;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Exceptions;
 use Illuminate\Support\Facades\Gate;
 
 beforeEach(function () {
@@ -29,6 +31,7 @@ it('returns 200 when status page is enabled and gate allows', function () {
 
     $this->get('/fuse')
         ->assertSuccessful()
+        ->assertViewHas('dataAvailable', fn ($available) => $available === true)
         ->assertSee('Probe candidate')
         ->assertSee('Elected probe');
 });
@@ -104,6 +107,27 @@ it('tracks state history across sequential requests', function () {
     expect($history[0]['to'])->toBe('open');
 });
 
+it('keeps state history separate per cache prefix', function () {
+    config(['fuse.status_page.enabled' => true]);
+    Gate::define('viewFuse', fn ($user = null) => true);
+    config(['fuse.services' => [
+        'stripe' => ['threshold' => 50, 'timeout' => 60, 'min_requests' => 5],
+    ]]);
+
+    config(['fuse.cache.prefix' => 'app1']);
+    $this->getJson('/fuse/data')->assertOk();
+    (new CircuitBreaker('stripe'))->forceOpen();
+    $this->getJson('/fuse/data')
+        ->assertOk()
+        ->assertJsonCount(1, 'services.stripe.state_history');
+
+    config(['fuse.cache.prefix' => 'app2']);
+    $this->getJson('/fuse/data')
+        ->assertOk()
+        ->assertJsonPath('services.stripe.state', 'closed')
+        ->assertJsonCount(0, 'services.stripe.state_history');
+});
+
 it('returns circuit_breaker_enabled from cache override', function () {
     config(['fuse.status_page.enabled' => true]);
     Gate::define('viewFuse', fn ($user = null) => true);
@@ -114,6 +138,29 @@ it('returns circuit_breaker_enabled from cache override', function () {
     $this->getJson('/fuse/data')
         ->assertOk()
         ->assertJsonPath('circuit_breaker_enabled', false);
+});
+
+it('reads circuit_breaker_enabled from the configured cache prefix', function () {
+    config(['fuse.status_page.enabled' => true]);
+    Gate::define('viewFuse', fn ($user = null) => true);
+    config(['fuse.cache.prefix' => 'app1']);
+    Cache::put('app1:enabled', false);
+
+    $this->getJson('/fuse/data')
+        ->assertOk()
+        ->assertJsonPath('circuit_breaker_enabled', false);
+});
+
+it('renders the page with the current enabled flag', function () {
+    config(['fuse.status_page.enabled' => true]);
+    Gate::define('viewFuse', fn ($user = null) => true);
+    config(['fuse.cache.prefix' => 'app1']);
+    Cache::put('app1:enabled', false);
+
+    $this->get('/fuse')
+        ->assertSuccessful()
+        ->assertViewHas('circuitBreakerEnabled', fn ($enabled) => $enabled === false)
+        ->assertSee('render(initialData, false,', false);
 });
 
 it('returns circuit_breaker_enabled from config fallback', function () {
@@ -157,4 +204,79 @@ it('data endpoint also guarded by middleware', function () {
     config(['fuse.status_page.enabled' => false]);
 
     $this->getJson('/fuse/data')->assertNotFound();
+});
+
+it('returns 404 when the status page is disabled even with custom middleware', function () {
+    config(['fuse.status_page.enabled' => false]);
+    config(['fuse.status_page.middleware' => ['web']]);
+    require __DIR__.'/../../routes/web.php';
+
+    $this->get('/fuse')->assertNotFound();
+    $this->getJson('/fuse/data')->assertNotFound();
+});
+
+it('lets custom middleware replace the viewFuse gate', function () {
+    config(['fuse.status_page.enabled' => true]);
+    config(['fuse.status_page.middleware' => ['web']]);
+    Gate::define('viewFuse', fn ($user = null) => false);
+    require __DIR__.'/../../routes/web.php';
+
+    $this->get('/fuse')->assertSuccessful();
+});
+
+it('enforces the viewFuse gate when custom middleware includes it', function () {
+    config(['fuse.status_page.enabled' => true]);
+    config(['fuse.status_page.middleware' => ['web', 'can:viewFuse']]);
+    Gate::define('viewFuse', fn ($user = null) => false);
+    require __DIR__.'/../../routes/web.php';
+
+    $this->get('/fuse')->assertForbidden();
+});
+
+it('returns 404 to a signed-in user when the status page is disabled behind auth middleware', function () {
+    config(['fuse.status_page.enabled' => false]);
+    config(['fuse.status_page.middleware' => ['web', 'auth']]);
+    require __DIR__.'/../../routes/web.php';
+
+    $this->actingAs(new GenericUser(['id' => 1]))->get('/fuse')->assertNotFound();
+    $this->actingAs(new GenericUser(['id' => 1]))->getJson('/fuse/data')->assertNotFound();
+});
+
+it('answers the data endpoint with 503 when the cache cannot be read', function () {
+    Exceptions::fake();
+    config(['fuse.status_page.enabled' => true]);
+    Gate::define('viewFuse', fn ($user = null) => true);
+    config(['fuse.services' => ['stripe' => ['threshold' => 50]]]);
+    useCacheThatIsDown();
+
+    $this->getJson('/fuse/data')
+        ->assertServiceUnavailable()
+        ->assertExactJson(['message' => 'Circuit data is unavailable.']);
+    Exceptions::assertReported(fn (RuntimeException $e) => $e->getMessage() === 'cache unreachable');
+});
+
+it('renders the page as unavailable when the cache cannot be read', function () {
+    Exceptions::fake();
+    config(['fuse.status_page.enabled' => true]);
+    Gate::define('viewFuse', fn ($user = null) => true);
+    config(['fuse.services' => ['stripe' => ['threshold' => 50]]]);
+    useCacheThatIsDown();
+
+    $this->get('/fuse')
+        ->assertSuccessful()
+        ->assertViewHas('initialData', fn ($data) => $data === [])
+        ->assertViewHas('dataAvailable', fn ($available) => $available === false)
+        ->assertSee('const dataAvailable = false;', false);
+    Exceptions::assertReported(fn (RuntimeException $e) => $e->getMessage() === 'cache unreachable');
+});
+
+it('keeps the outage responses when reporting fails', function () {
+    config(['fuse.status_page.enabled' => true]);
+    Gate::define('viewFuse', fn ($user = null) => true);
+    config(['fuse.services' => ['stripe' => ['threshold' => 50]]]);
+    useCacheThatIsDown();
+    Exceptions::reportable(fn (RuntimeException $e) => throw new LogicException('reporter down'));
+
+    $this->getJson('/fuse/data')->assertServiceUnavailable();
+    $this->get('/fuse')->assertSuccessful();
 });
