@@ -43,31 +43,45 @@ class CircuitBreakerMiddleware
                 return $job->release($breaker->releaseDelay());
             }
 
+            return $this->run($job, $next, $breaker, fn (Throwable $e) => $this->recordProbeFailure($breaker, $e));
+        }
+
+        return $this->run($job, $next, $breaker, fn (Throwable $e) => $breaker->recordFailure($e));
+    }
+
+    /**
+     * @param  callable(Throwable): void  $recordFailure
+     */
+    private function run(mixed $job, callable $next, CircuitBreaker $breaker, callable $recordFailure): mixed
+    {
+        try {
+            $result = $next($job);
+        } catch (Throwable $e) {
             try {
-                $result = $next($job);
-                $breaker->recordSuccess();
-
-                return $result;
-            } catch (Throwable $e) {
-                $before = $breaker->getState();
-                $breaker->recordFailure($e);
-
-                if ($breaker->getState() === $before) {
-                    $breaker->recoveryStrategy()->recordFailure($breaker);
-                }
-
-                throw $e;
+                $recordFailure($e);
+            } catch (Throwable $bookkeepingError) {
+                report($bookkeepingError);
             }
+
+            throw $e;
         }
 
         try {
-            $result = $next($job);
             $breaker->recordSuccess();
-
-            return $result;
         } catch (Throwable $e) {
-            $breaker->recordFailure($e);
-            throw $e;
+            report($e);
+        }
+
+        return $result;
+    }
+
+    private function recordProbeFailure(CircuitBreaker $breaker, Throwable $e): void
+    {
+        $before = $breaker->getState();
+        $breaker->recordFailure($e);
+
+        if ($breaker->getState() === $before) {
+            $breaker->recoveryStrategy()->recordFailure($breaker);
         }
     }
 

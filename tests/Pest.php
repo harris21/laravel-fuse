@@ -2,6 +2,7 @@
 
 use Harris21\Fuse\CircuitBreaker;
 use Harris21\Fuse\Tests\TestCase;
+use Illuminate\Cache\ArrayStore;
 use Illuminate\Support\Facades\Cache;
 
 uses(TestCase::class)->in('Feature');
@@ -14,6 +15,22 @@ function forceHalfOpen(string $service = 'test-service'): CircuitBreaker
     $breaker->isOpen();
 
     return $breaker;
+}
+
+function useCacheThatCannotIncrement(): void
+{
+    Cache::extend('cannot-increment', fn () => Cache::repository(new class extends ArrayStore
+    {
+        public function increment($key, $value = 1)
+        {
+            throw new RuntimeException('cache increment failed');
+        }
+    }));
+
+    config([
+        'cache.stores.cannot-increment' => ['driver' => 'cannot-increment'],
+        'cache.default' => 'cannot-increment',
+    ]);
 }
 
 function tripToHalfOpen(string $service = 'test-service'): CircuitBreaker

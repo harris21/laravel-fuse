@@ -476,3 +476,37 @@ it('rethrows the job exception when a CircuitBreakerOpened listener throws', fun
     expect((new CircuitBreaker('test-service'))->isOpen())->toBeTrue();
     Exceptions::assertReported(fn (RuntimeException $e) => $e->getMessage() === 'listener down');
 });
+
+it('keeps a successful job successful when the cache cannot record it', function (bool $probing) {
+    Exceptions::fake();
+    useCacheThatCannotIncrement();
+
+    if ($probing) {
+        forceHalfOpen();
+    }
+
+    $calls = 0;
+    $result = (new CircuitBreakerMiddleware('test-service'))->handle(makeJob(), function () use (&$calls) {
+        $calls++;
+
+        return 'charged';
+    });
+
+    expect($result)->toBe('charged');
+    expect($calls)->toBe(1);
+    Exceptions::assertReported(fn (RuntimeException $e) => $e->getMessage() === 'cache increment failed');
+})->with([
+    'closed circuit' => false,
+    'half-open probe' => true,
+]);
+
+it('rethrows the job exception when the cache cannot record the failure', function () {
+    Exceptions::fake();
+    useCacheThatCannotIncrement();
+
+    expect(fn () => (new CircuitBreakerMiddleware('test-service'))->handle(makeJob(), function () {
+        throw new RuntimeException('stripe timeout');
+    }))->toThrow(RuntimeException::class, 'stripe timeout');
+
+    Exceptions::assertReported(fn (RuntimeException $e) => $e->getMessage() === 'cache increment failed');
+});
