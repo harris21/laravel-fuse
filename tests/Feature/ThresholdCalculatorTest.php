@@ -180,6 +180,21 @@ it('handles midnight correctly', function () {
     expect(ThresholdCalculator::for('stripe'))->toBe(40); // Off-peak
 });
 
+it('reads the config of a service whose name contains a dot', function () {
+    Carbon::setTestNow(Carbon::createFromTime(22, 0, 0));
+
+    config(['fuse.services' => ['payments.stripe' => [
+        'threshold' => 20,
+        'timeout' => 5,
+    ]]]);
+
+    expect(ThresholdCalculator::for('payments.stripe'))->toBe(20);
+    expect(ThresholdCalculator::getConfig('payments.stripe'))->toMatchArray([
+        'threshold' => 20,
+        'timeout' => 5,
+    ]);
+});
+
 it('handles early morning correctly', function () {
     Carbon::setTestNow(Carbon::createFromTime(6, 0, 0)); // 6 AM
 

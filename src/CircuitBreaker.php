@@ -41,7 +41,7 @@ class CircuitBreaker
         ?int $release = null,
         ?int $jobTimeout = null,
     ) {
-        $config = config("fuse.services.{$serviceName}", []);
+        $config = config('fuse.services', [])[$serviceName] ?? [];
 
         $this->failureThreshold = ThresholdCalculator::for($serviceName);
 

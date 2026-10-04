@@ -284,6 +284,20 @@ it('uses service-specific config', function () {
     expect($stats['min_requests'])->toBe(3);
 });
 
+it('uses service-specific config for a service whose name contains a dot', function () {
+    config(['fuse.services' => ['payments.stripe' => [
+        'threshold' => 30,
+        'timeout' => 120,
+        'min_requests' => 3,
+    ]]]);
+
+    $stats = (new CircuitBreaker('payments.stripe'))->getStats();
+
+    expect($stats['threshold'])->toBe(30);
+    expect($stats['timeout'])->toBe(120);
+    expect($stats['min_requests'])->toBe(3);
+});
+
 it('resolves release and probe lock timing from service config and job timeout', function () {
     config(['fuse.services.test-service.release' => 20]);
     config(['fuse.services.test-service.probe_lock_ttl' => 90]);
