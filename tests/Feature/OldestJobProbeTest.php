@@ -12,6 +12,14 @@ use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Exceptions;
 
+class CandidateStoreThatThrows extends OldestJobProbe
+{
+    public function observeHeldJob(CircuitBreaker $breaker, HeldJob $job): void
+    {
+        throw new RuntimeException('candidate store down');
+    }
+}
+
 beforeEach(function () {
     Cache::flush();
     config(['fuse.enabled' => true]);
@@ -76,6 +84,19 @@ it('keeps the first-seen job on a same-second tie', function () {
     $middleware->handle(makeQueuedJob('second', 1000), fn () => 'success');
 
     expect(candidateFor()['uuid'])->toBe('first');
+});
+
+it('releases a held job when the strategy cannot record it', function () {
+    Exceptions::fake();
+    config(['fuse.services.test-service.recovery_strategy' => CandidateStoreThatThrows::class]);
+    tripOpen();
+    $job = makeQueuedJob('older');
+
+    $result = (new CircuitBreakerMiddleware('test-service'))->handle($job, fn () => 'charged');
+
+    expect($result)->toBe('released')
+        ->and($job->released)->toBeTrue();
+    Exceptions::assertReported(fn (RuntimeException $e) => $e->getMessage() === 'candidate store down');
 });
 
 it('dates a held job without a createdAt by the Carbon clock', function () {

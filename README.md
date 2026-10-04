@@ -51,6 +51,8 @@ When Stripe goes down at 11 PM, your queue workers don't know. They keep trying 
 
 **HALF-OPEN** — Testing recovery. After the timeout period, one probe request tests if the service recovered. Success closes the circuit. Failure reopens it. If you need to, you may [customize the probe request](#recovery-strategies).
 
+If a cache call fails while Fuse decides whether a job may run, for example on a timeout, the middleware reports the error and releases the job with its `release` delay, so that error does not count toward the job's `maxExceptions`. If the kill switch can't be read, Fuse reports that too and goes by `fuse.enabled`. On the `sync` driver, where a release would drop the job, the error is thrown as before.
+
 ---
 
 ## Installation

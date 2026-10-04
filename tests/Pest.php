@@ -34,6 +34,37 @@ function useCacheThatCannotIncrement(): void
     ]);
 }
 
+function useCacheThatIsDown(): void
+{
+    Cache::extend('down', fn () => Cache::repository(new class extends ArrayStore
+    {
+        public function get($key)
+        {
+            throw new RuntimeException('cache unreachable');
+        }
+
+        public function put($key, $value, $seconds)
+        {
+            throw new RuntimeException('cache unreachable');
+        }
+
+        public function increment($key, $value = 1)
+        {
+            throw new RuntimeException('cache unreachable');
+        }
+
+        public function lock($name, $seconds = 0, $owner = null)
+        {
+            throw new RuntimeException('cache unreachable');
+        }
+    }));
+
+    config([
+        'cache.stores.down' => ['driver' => 'down'],
+        'cache.default' => 'down',
+    ]);
+}
+
 function tripToHalfOpen(string $service = 'test-service'): CircuitBreaker
 {
     config(['fuse.default_timeout' => 1]);
