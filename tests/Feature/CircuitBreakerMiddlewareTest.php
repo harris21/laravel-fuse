@@ -510,3 +510,27 @@ it('rethrows the job exception when the cache cannot record the failure', functi
 
     Exceptions::assertReported(fn (RuntimeException $e) => $e->getMessage() === 'cache increment failed');
 });
+
+it('keeps a successful job successful when reporting a bookkeeping error fails', function () {
+    useCacheThatCannotIncrement();
+    Exceptions::reportable(fn (RuntimeException $e) => throw new LogicException('reporter down'));
+
+    $calls = 0;
+    $result = (new CircuitBreakerMiddleware('test-service'))->handle(makeJob(), function () use (&$calls) {
+        $calls++;
+
+        return 'charged';
+    });
+
+    expect($result)->toBe('charged');
+    expect($calls)->toBe(1);
+});
+
+it('rethrows the job exception when reporting a bookkeeping error fails', function () {
+    useCacheThatCannotIncrement();
+    Exceptions::reportable(fn (RuntimeException $e) => throw new LogicException('reporter down'));
+
+    expect(fn () => (new CircuitBreakerMiddleware('test-service'))->handle(makeJob(), function () {
+        throw new RuntimeException('stripe timeout');
+    }))->toThrow(RuntimeException::class, 'stripe timeout');
+});

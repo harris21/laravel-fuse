@@ -334,11 +334,22 @@ class CircuitBreaker
                     CircuitState::Closed => new CircuitBreakerClosed($this->serviceName),
                 });
             } catch (Throwable $e) {
-                report($e);
+                $this->reportWithoutThrowing($e);
             }
         }
 
         return $changed;
+    }
+
+    /**
+     * The transition has already happened, so a reporter that throws must not stop it from finishing.
+     */
+    private function reportWithoutThrowing(Throwable $e): void
+    {
+        try {
+            report($e);
+        } catch (Throwable) {
+        }
     }
 
     private function forgetCandidate(): void

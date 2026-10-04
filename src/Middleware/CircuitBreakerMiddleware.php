@@ -60,7 +60,7 @@ class CircuitBreakerMiddleware
             try {
                 $recordFailure($e);
             } catch (Throwable $bookkeepingError) {
-                report($bookkeepingError);
+                $this->reportWithoutThrowing($bookkeepingError);
             }
 
             throw $e;
@@ -69,10 +69,21 @@ class CircuitBreakerMiddleware
         try {
             $breaker->recordSuccess();
         } catch (Throwable $e) {
-            report($e);
+            $this->reportWithoutThrowing($e);
         }
 
         return $result;
+    }
+
+    /**
+     * The job has already run, so a reporter that throws must not change its outcome.
+     */
+    private function reportWithoutThrowing(Throwable $e): void
+    {
+        try {
+            report($e);
+        } catch (Throwable) {
+        }
     }
 
     private function recordProbeFailure(CircuitBreaker $breaker, Throwable $e): void

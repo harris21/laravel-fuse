@@ -165,3 +165,15 @@ it('releases the probe lock when a CircuitBreakerOpened listener throws on a fai
     expect($breaker->isOpen())->toBeTrue();
     expect(Cache::lock($breaker->key('probe'), 5)->get())->toBeTrue();
 });
+
+it('releases the probe lock when both a CircuitBreakerOpened listener and the reporter throw', function () {
+    $breaker = forceHalfOpen();
+    expect($breaker->recoveryStrategy()->allowsAttempt($breaker))->toBeTrue();
+
+    Event::listen(CircuitBreakerOpened::class, fn () => throw new RuntimeException('listener down'));
+    Exceptions::reportable(fn (RuntimeException $e) => throw new LogicException('reporter down'));
+
+    expect(fn () => $breaker->recordFailure(new RuntimeException('probe failed')))->not->toThrow(LogicException::class);
+    expect($breaker->isOpen())->toBeTrue();
+    expect(Cache::lock($breaker->key('probe'), 5)->get())->toBeTrue();
+});
