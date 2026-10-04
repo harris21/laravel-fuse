@@ -2,8 +2,19 @@
 
 use Harris21\Fuse\CircuitBreaker;
 use Harris21\Fuse\Tests\TestCase;
+use Illuminate\Support\Facades\Cache;
 
 uses(TestCase::class)->in('Feature');
+
+function forceHalfOpen(string $service = 'test-service'): CircuitBreaker
+{
+    $breaker = new CircuitBreaker($service);
+    $breaker->forceOpen();
+    Cache::put($breaker->key('opened_at'), time() - $breaker->timeout() - 1);
+    $breaker->isOpen();
+
+    return $breaker;
+}
 
 function tripToHalfOpen(string $service = 'test-service'): CircuitBreaker
 {

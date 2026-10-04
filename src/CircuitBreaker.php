@@ -322,16 +322,20 @@ class CircuitBreaker
         });
 
         if ($changed) {
-            match ($newState) {
-                CircuitState::Open => event(new CircuitBreakerOpened(
-                    $this->serviceName,
-                    $failureRate,
-                    $attempts,
-                    $failures
-                )),
-                CircuitState::HalfOpen => event(new CircuitBreakerHalfOpen($this->serviceName)),
-                CircuitState::Closed => event(new CircuitBreakerClosed($this->serviceName)),
-            };
+            try {
+                event(match ($newState) {
+                    CircuitState::Open => new CircuitBreakerOpened(
+                        $this->serviceName,
+                        $failureRate,
+                        $attempts,
+                        $failures
+                    ),
+                    CircuitState::HalfOpen => new CircuitBreakerHalfOpen($this->serviceName),
+                    CircuitState::Closed => new CircuitBreakerClosed($this->serviceName),
+                });
+            } catch (Throwable $e) {
+                report($e);
+            }
         }
 
         return $changed;

@@ -6,6 +6,7 @@ use Harris21\Fuse\Events\CircuitBreakerHalfOpen;
 use Harris21\Fuse\Events\CircuitBreakerOpened;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Exceptions;
 
 beforeEach(function () {
     Cache::flush();
@@ -140,4 +141,27 @@ it('dispatches CircuitBreakerOpened event when probe fails in half-open state', 
             && $event->attempts === 1
             && $event->failures === 1;
     });
+});
+
+it('reports a listener that throws instead of letting the exception escape', function () {
+    Exceptions::fake();
+    Event::listen(CircuitBreakerOpened::class, fn () => throw new RuntimeException('listener down'));
+
+    $breaker = new CircuitBreaker('test-service');
+
+    expect(fn () => $breaker->forceOpen())->not->toThrow(RuntimeException::class);
+    expect($breaker->isOpen())->toBeTrue();
+    Exceptions::assertReported(fn (RuntimeException $e) => $e->getMessage() === 'listener down');
+});
+
+it('releases the probe lock when a CircuitBreakerOpened listener throws on a failed probe', function () {
+    $breaker = forceHalfOpen();
+    expect($breaker->recoveryStrategy()->allowsAttempt($breaker))->toBeTrue();
+
+    Exceptions::fake();
+    Event::listen(CircuitBreakerOpened::class, fn () => throw new RuntimeException('listener down'));
+
+    expect(fn () => $breaker->recordFailure(new RuntimeException('probe failed')))->not->toThrow(RuntimeException::class);
+    expect($breaker->isOpen())->toBeTrue();
+    expect(Cache::lock($breaker->key('probe'), 5)->get())->toBeTrue();
 });

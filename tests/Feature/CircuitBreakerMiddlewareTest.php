@@ -1,8 +1,13 @@
 <?php
 
 use Harris21\Fuse\CircuitBreaker;
+use Harris21\Fuse\Events\CircuitBreakerClosed;
+use Harris21\Fuse\Events\CircuitBreakerHalfOpen;
+use Harris21\Fuse\Events\CircuitBreakerOpened;
 use Harris21\Fuse\Middleware\CircuitBreakerMiddleware;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Exceptions;
 
 beforeEach(function () {
     Cache::flush();
@@ -418,4 +423,56 @@ it('releases non-probe workers in half-open state', function () {
     expect($result)->toBe('released');
 
     $probeLock->forceRelease();
+});
+
+it('runs the probe when a CircuitBreakerHalfOpen listener throws', function () {
+    Exceptions::fake();
+    $breaker = new CircuitBreaker('test-service');
+    $breaker->forceOpen();
+    Cache::put($breaker->key('opened_at'), time() - $breaker->timeout() - 1);
+    Event::listen(CircuitBreakerHalfOpen::class, fn () => throw new RuntimeException('listener down'));
+
+    $calls = 0;
+    $result = (new CircuitBreakerMiddleware('test-service'))->handle(makeJob(), function () use (&$calls) {
+        $calls++;
+
+        return 'charged';
+    });
+
+    expect($result)->toBe('charged');
+    expect($calls)->toBe(1);
+    expect($breaker->isClosed())->toBeTrue();
+    Exceptions::assertReported(fn (RuntimeException $e) => $e->getMessage() === 'listener down');
+});
+
+it('does not fail a successful probe when a CircuitBreakerClosed listener throws', function () {
+    Exceptions::fake();
+    $breaker = forceHalfOpen();
+    Event::listen(CircuitBreakerClosed::class, fn () => throw new RuntimeException('listener down'));
+
+    $calls = 0;
+    $result = (new CircuitBreakerMiddleware('test-service'))->handle(makeJob(), function () use (&$calls) {
+        $calls++;
+
+        return 'charged';
+    });
+
+    expect($result)->toBe('charged');
+    expect($calls)->toBe(1);
+    expect($breaker->isClosed())->toBeTrue();
+    expect($breaker->getStats()['failures'])->toBe(0);
+    Exceptions::assertReported(fn (RuntimeException $e) => $e->getMessage() === 'listener down');
+});
+
+it('rethrows the job exception when a CircuitBreakerOpened listener throws', function () {
+    Exceptions::fake();
+    config(['fuse.default_min_requests' => 1]);
+    Event::listen(CircuitBreakerOpened::class, fn () => throw new RuntimeException('listener down'));
+
+    expect(fn () => (new CircuitBreakerMiddleware('test-service'))->handle(makeJob(), function () {
+        throw new RuntimeException('stripe timeout');
+    }))->toThrow(RuntimeException::class, 'stripe timeout');
+
+    expect((new CircuitBreaker('test-service'))->isOpen())->toBeTrue();
+    Exceptions::assertReported(fn (RuntimeException $e) => $e->getMessage() === 'listener down');
 });
