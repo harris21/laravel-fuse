@@ -3,6 +3,7 @@
 use Carbon\Carbon;
 use Harris21\Fuse\CircuitBreaker;
 use Harris21\Fuse\Contracts\JobAwareRecoveryStrategy;
+use Harris21\Fuse\Contracts\RecoveryStrategy;
 use Harris21\Fuse\Enums\CircuitState;
 use Harris21\Fuse\HeldJob;
 use Illuminate\Support\Facades\Cache;
@@ -208,6 +209,42 @@ it('cleans a closed-state candidate before publishing the open state', function 
 
     expect($strategy->states)->toBe([CircuitState::Closed])
         ->and($breaker->isOpen())->toBeTrue();
+});
+
+it('counts a successful probe before the recovery strategy sees it', function () {
+    $strategy = new class implements RecoveryStrategy
+    {
+        public ?int $attemptsSeen = null;
+
+        public function allowsAttempt(CircuitBreaker $breaker): bool
+        {
+            return true;
+        }
+
+        public function recordSuccess(CircuitBreaker $breaker): bool
+        {
+            $this->attemptsSeen = $breaker->getStats()['attempts'];
+
+            return true;
+        }
+
+        public function recordFailure(CircuitBreaker $breaker): void {}
+    };
+
+    app()->instance('counting-strategy', $strategy);
+    config(['fuse.services.test-service.recovery_strategy' => 'counting-strategy']);
+
+    forceHalfOpen()->recordSuccess();
+
+    expect($strategy->attemptsSeen)->toBe(1);
+});
+
+it('finishes a successful probe before rethrowing a counting error', function () {
+    useCacheThatCannotIncrement();
+    $breaker = forceHalfOpen();
+
+    expect(fn () => $breaker->recordSuccess())->toThrow(RuntimeException::class, 'cache increment failed');
+    expect($breaker->isClosed())->toBeTrue();
 });
 
 it('transitions back to open on failure in half-open state', function () {

@@ -133,12 +133,22 @@ class CircuitBreaker
 
     public function recordSuccess(): void
     {
-        $this->incrementAttempts();
+        $countingError = null;
+
+        try {
+            $this->incrementAttempts();
+        } catch (Throwable $e) {
+            $countingError = $e;
+        }
 
         if ($this->getState() === CircuitState::HalfOpen) {
             if ($this->recoveryStrategy->recordSuccess($this)) {
                 $this->transitionTo(CircuitState::Closed);
             }
+        }
+
+        if ($countingError !== null) {
+            throw $countingError;
         }
     }
 

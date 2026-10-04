@@ -511,6 +511,19 @@ it('rethrows the job exception when the cache cannot record the failure', functi
     Exceptions::assertReported(fn (RuntimeException $e) => $e->getMessage() === 'cache increment failed');
 });
 
+it('closes the circuit after a successful probe even when the cache cannot count it', function () {
+    Exceptions::fake();
+    useCacheThatCannotIncrement();
+    $breaker = forceHalfOpen();
+
+    $result = (new CircuitBreakerMiddleware('test-service'))->handle(makeJob(), fn () => 'charged');
+
+    expect($result)->toBe('charged');
+    expect($breaker->isClosed())->toBeTrue();
+    expect(Cache::lock($breaker->key('probe'), 5)->get())->toBeTrue();
+    Exceptions::assertReported(fn (RuntimeException $e) => $e->getMessage() === 'cache increment failed');
+});
+
 it('keeps a successful job successful when reporting a bookkeeping error fails', function () {
     useCacheThatCannotIncrement();
     Exceptions::reportable(fn (RuntimeException $e) => throw new LogicException('reporter down'));

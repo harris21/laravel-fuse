@@ -10,6 +10,7 @@ use Illuminate\Contracts\Queue\Job;
 use Illuminate\Queue\Events\JobFailed;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Config;
+use Illuminate\Support\Facades\Exceptions;
 
 beforeEach(function () {
     Cache::flush();
@@ -204,6 +205,21 @@ it('clears the candidate and closes the circuit when the probe succeeds', functi
     expect((new CircuitBreaker('test-service'))->isClosed())->toBeTrue();
     expect(candidateFor())->toBeNull();
     expect(Cache::get('fuse:probe-candidate:older'))->toBeNull();
+});
+
+it('clears the candidate and closes the circuit when counting the successful probe fails', function () {
+    Exceptions::fake();
+    useCacheThatCannotIncrement();
+    forceHalfOpen();
+    Cache::put('fuse:test-service:probe-candidate', ['uuid' => 'older', 'created_at' => 1000, 'name' => 'A'], 60);
+    Cache::put('fuse:probe-candidate:older', 'test-service', 60);
+
+    $result = (new CircuitBreakerMiddleware('test-service'))->handle(makeQueuedJob('older', 1000), fn () => 'success');
+
+    expect($result)->toBe('success');
+    expect((new CircuitBreaker('test-service'))->isClosed())->toBeTrue();
+    expect(candidateFor())->toBeNull();
+    Exceptions::assertReported(fn (RuntimeException $e) => $e->getMessage() === 'cache increment failed');
 });
 
 it('clears the candidate when the circuit is force closed', function () {
