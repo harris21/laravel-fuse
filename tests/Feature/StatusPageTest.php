@@ -116,6 +116,29 @@ it('returns circuit_breaker_enabled from cache override', function () {
         ->assertJsonPath('circuit_breaker_enabled', false);
 });
 
+it('reads circuit_breaker_enabled from the configured cache prefix', function () {
+    config(['fuse.status_page.enabled' => true]);
+    Gate::define('viewFuse', fn ($user = null) => true);
+    config(['fuse.cache.prefix' => 'app1']);
+    Cache::put('app1:enabled', false);
+
+    $this->getJson('/fuse/data')
+        ->assertOk()
+        ->assertJsonPath('circuit_breaker_enabled', false);
+});
+
+it('renders the page with the current enabled flag', function () {
+    config(['fuse.status_page.enabled' => true]);
+    Gate::define('viewFuse', fn ($user = null) => true);
+    config(['fuse.cache.prefix' => 'app1']);
+    Cache::put('app1:enabled', false);
+
+    $this->get('/fuse')
+        ->assertSuccessful()
+        ->assertViewHas('circuitBreakerEnabled', fn ($enabled) => $enabled === false)
+        ->assertSee('render(initialData, false,', false);
+});
+
 it('returns circuit_breaker_enabled from config fallback', function () {
     config(['fuse.status_page.enabled' => true]);
     Gate::define('viewFuse', fn ($user = null) => true);

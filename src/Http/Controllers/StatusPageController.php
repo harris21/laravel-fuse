@@ -14,6 +14,7 @@ class StatusPageController
     {
         return view('fuse::status', [
             'initialData' => $this->buildServiceData(),
+            'circuitBreakerEnabled' => $this->isEnabled(),
             'pollingInterval' => config('fuse.status_page.polling_interval', 2),
         ]);
     }
@@ -53,7 +54,8 @@ class StatusPageController
 
     private function isEnabled(): bool
     {
-        $cacheValue = Cache::get('fuse:enabled');
+        $prefix = config('fuse.cache.prefix', 'fuse');
+        $cacheValue = Cache::get("{$prefix}:enabled");
 
         if ($cacheValue !== null) {
             return (bool) $cacheValue;

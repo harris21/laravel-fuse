@@ -795,7 +795,7 @@
         });
 
         // Initial render
-        render(initialData, true, new Date().toLocaleTimeString('en-GB', { hour12: false }));
+        render(initialData, @json($circuitBreakerEnabled), new Date().toLocaleTimeString('en-GB', { hour12: false }));
 
         // Polling
         setInterval(async () => {
