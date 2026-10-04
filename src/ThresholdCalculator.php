@@ -10,10 +10,11 @@ class ThresholdCalculator
      */
     public static function for(string $service): int
     {
-        $config = config('fuse.services', [])[$service] ?? null;
+        $config = config('fuse.services', [])[$service] ?? [];
+        $threshold = $config['threshold'] ?? config('fuse.default_threshold') ?? 50;
 
-        if (! $config) {
-            return config('fuse.default_threshold', 50);
+        if (! isset($config['peak_hours_threshold'])) {
+            return $threshold;
         }
 
         $hour = now()->hour;
@@ -23,9 +24,7 @@ class ThresholdCalculator
 
         $isPeakHours = $hour >= $peakStart && $hour <= $peakEnd;
 
-        return $isPeakHours
-            ? ($config['peak_hours_threshold'] ?? $config['threshold'] ?? 60)
-            : ($config['threshold'] ?? 50);
+        return $isPeakHours ? $config['peak_hours_threshold'] : $threshold;
     }
 
     /**

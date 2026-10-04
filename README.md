@@ -206,6 +206,8 @@ Configure different thresholds for business hours when every transaction matters
 
 During peak hours (9 AM - 5 PM), the circuit uses the higher threshold to maximize successful transactions. Outside peak hours, it uses the lower threshold for earlier protection.
 
+Without `peak_hours_threshold`, a service uses its `threshold` (or `default_threshold` when it sets none) at every hour of the day.
+
 ---
 
 ## Tracking Window

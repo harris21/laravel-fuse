@@ -426,6 +426,22 @@ it('trips at different thresholds based on time of day', function () {
     expect($offPeakBreaker->isOpen())->toBeTrue();
 });
 
+it('trips at the default threshold for a configured service without one', function () {
+    config(['fuse.default_threshold' => 30]);
+    config(['fuse.services.mailgun' => ['timeout' => 30, 'min_requests' => 10]]);
+
+    $breaker = new CircuitBreaker('mailgun');
+
+    for ($i = 0; $i < 7; $i++) {
+        $breaker->recordSuccess();
+    }
+    for ($i = 0; $i < 3; $i++) {
+        $breaker->recordFailure();
+    }
+
+    expect($breaker->getState())->toBe(CircuitState::Open);
+});
+
 it('uses a 60-second default window when none configured', function () {
     $breaker = new CircuitBreaker('test-service');
 

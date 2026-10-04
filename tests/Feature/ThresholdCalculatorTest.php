@@ -120,6 +120,44 @@ it('uses default threshold when only peak_hours_threshold configured', function 
     expect(ThresholdCalculator::for('stripe'))->toBe(50); // default threshold
 });
 
+it('falls back to the default threshold for a configured service without one', function () {
+    config(['fuse.default_threshold' => 30]);
+    config(['fuse.services.stripe' => ['timeout' => 30]]);
+
+    Carbon::setTestNow(Carbon::createFromTime(3, 0, 0));
+    expect(ThresholdCalculator::for('stripe'))->toBe(30);
+
+    Carbon::setTestNow(Carbon::createFromTime(12, 0, 0));
+    expect(ThresholdCalculator::for('stripe'))->toBe(30);
+});
+
+it('falls back to the default threshold off-peak when only peak_hours_threshold is configured', function () {
+    config(['fuse.default_threshold' => 30]);
+    config(['fuse.services.stripe' => [
+        'peak_hours_threshold' => 70,
+        'peak_hours_start' => 9,
+        'peak_hours_end' => 17,
+    ]]);
+
+    Carbon::setTestNow(Carbon::createFromTime(22, 0, 0));
+    expect(ThresholdCalculator::for('stripe'))->toBe(30);
+
+    Carbon::setTestNow(Carbon::createFromTime(12, 0, 0));
+    expect(ThresholdCalculator::for('stripe'))->toBe(70);
+});
+
+it('falls back to 50 when default_threshold is null', function (array $services) {
+    Carbon::setTestNow(Carbon::createFromTime(3, 0, 0));
+    config(['fuse.default_threshold' => null]);
+    config(['fuse.services' => $services]);
+
+    expect(ThresholdCalculator::for('stripe'))->toBe(50);
+})->with([
+    'unconfigured service' => [[]],
+    'service without a threshold' => [['stripe' => ['timeout' => 30]]],
+    'peak-only service off-peak' => [['stripe' => ['peak_hours_threshold' => 70]]],
+]);
+
 it('getConfig returns all config values with calculated threshold', function () {
     Carbon::setTestNow(Carbon::createFromTime(12, 0, 0)); // Peak hours
 
