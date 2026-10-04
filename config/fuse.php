@@ -47,7 +47,8 @@ return [
     | - window: Seconds per failure-tracking window; raise for low-throughput queues (default: 60)
     | - peak_hours_threshold: Alternative threshold during peak hours (optional)
     | - peak_hours_start: Hour (0-23) when peak hours begin (optional)
-    | - peak_hours_end: Hour (0-23) when peak hours end (optional)
+    | - peak_hours_end: Hour (0-23) when peak hours end, inclusive. Set it below
+    |   peak_hours_start for a window that crosses midnight (optional)
     | - failure_classifier: Custom FailureClassifier class for this service (optional)
     | - recovery_strategy: Custom RecoveryStrategy class for this service (optional).
     |   Use \Harris21\Fuse\Strategies\OldestJobProbe::class to keep the oldest

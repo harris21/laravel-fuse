@@ -233,6 +233,59 @@ it('reads the config of a service whose name contains a dot', function () {
     ]);
 });
 
+it('applies a peak window that crosses midnight', function (int $hour, int $expected) {
+    Carbon::setTestNow(Carbon::createFromTime($hour, 0, 0));
+
+    config(['fuse.services.stripe' => [
+        'threshold' => 40,
+        'peak_hours_threshold' => 80,
+        'peak_hours_start' => 22,
+        'peak_hours_end' => 6,
+    ]]);
+
+    expect(ThresholdCalculator::for('stripe'))->toBe($expected);
+})->with([
+    'start hour' => [22, 80],
+    'after midnight' => [2, 80],
+    'end hour' => [6, 80],
+    'after the end' => [7, 40],
+    'midday' => [12, 40],
+    'before the start' => [21, 40],
+]);
+
+it('getConfig identifies peak hours in a window that crosses midnight', function () {
+    Carbon::setTestNow(Carbon::createFromTime(23, 0, 0));
+
+    config(['fuse.services.stripe' => [
+        'threshold' => 40,
+        'peak_hours_threshold' => 80,
+        'peak_hours_start' => 22,
+        'peak_hours_end' => 6,
+    ]]);
+
+    expect(ThresholdCalculator::getConfig('stripe'))->toMatchArray([
+        'threshold' => 80,
+        'is_peak_hours' => true,
+    ]);
+});
+
+it('getConfig treats a non-array service config as empty', function (mixed $serviceConfig) {
+    Carbon::setTestNow(Carbon::createFromTime(3, 0, 0));
+    config(['fuse.services' => ['stripe' => $serviceConfig]]);
+
+    expect(ThresholdCalculator::getConfig('stripe'))->toMatchArray([
+        'threshold' => 50,
+        'timeout' => 60,
+        'min_requests' => 10,
+        'is_peak_hours' => false,
+    ]);
+})->with([
+    'false' => [false],
+    'zero' => [0],
+    'empty string' => [''],
+    'string' => ['disabled'],
+]);
+
 it('handles early morning correctly', function () {
     Carbon::setTestNow(Carbon::createFromTime(6, 0, 0)); // 6 AM
 

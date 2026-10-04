@@ -208,6 +208,8 @@ During peak hours (9 AM - 5 PM), the circuit uses the higher threshold to maximi
 
 Without `peak_hours_threshold`, a service uses its `threshold` (or `default_threshold` when it sets none) at every hour of the day.
 
+A peak window can cross midnight: `'peak_hours_start' => 22` with `'peak_hours_end' => 6` covers 22:00 to 06:59. Both hours are inclusive, so an end of 17 lasts until 17:59.
+
 ---
 
 ## Tracking Window

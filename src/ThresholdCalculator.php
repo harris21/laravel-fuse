@@ -17,14 +17,7 @@ class ThresholdCalculator
             return $threshold;
         }
 
-        $hour = now()->hour;
-
-        $peakStart = $config['peak_hours_start'] ?? 9;
-        $peakEnd = $config['peak_hours_end'] ?? 17;
-
-        $isPeakHours = $hour >= $peakStart && $hour <= $peakEnd;
-
-        return $isPeakHours ? $config['peak_hours_threshold'] : $threshold;
+        return self::isPeakHours($config) ? $config['peak_hours_threshold'] : $threshold;
     }
 
     /**
@@ -33,17 +26,28 @@ class ThresholdCalculator
     public static function getConfig(string $service): array
     {
         $config = config('fuse.services', [])[$service] ?? [];
-        $hour = now()->hour;
-
-        $peakStart = $config['peak_hours_start'] ?? 9;
-        $peakEnd = $config['peak_hours_end'] ?? 17;
-        $isPeakHours = $hour >= $peakStart && $hour <= $peakEnd;
 
         return [
             'threshold' => self::for($service),
             'timeout' => $config['timeout'] ?? config('fuse.default_timeout', 60),
             'min_requests' => $config['min_requests'] ?? config('fuse.default_min_requests', 10),
-            'is_peak_hours' => $isPeakHours,
+            'is_peak_hours' => self::isPeakHours(is_array($config) ? $config : []),
         ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $config
+     */
+    private static function isPeakHours(array $config): bool
+    {
+        $hour = now()->hour;
+        $start = $config['peak_hours_start'] ?? 9;
+        $end = $config['peak_hours_end'] ?? 17;
+
+        if ($start <= $end) {
+            return $hour >= $start && $hour <= $end;
+        }
+
+        return $hour >= $start || $hour <= $end;
     }
 }
