@@ -1,5 +1,6 @@
 <?php
 
+use Carbon\Carbon;
 use Harris21\Fuse\CircuitBreaker;
 use Harris21\Fuse\Events\CircuitBreakerClosed;
 use Harris21\Fuse\Events\CircuitBreakerHalfOpen;
@@ -45,7 +46,7 @@ it('dispatches CircuitBreakerHalfOpen event when circuit transitions to half-ope
         $breaker->recordFailure();
     }
 
-    sleep(2);
+    Carbon::setTestNow(now()->addSeconds(2));
     $breaker->isOpen();
 
     Event::assertDispatched(CircuitBreakerHalfOpen::class, function ($event) {
@@ -64,7 +65,7 @@ it('dispatches CircuitBreakerClosed event when circuit closes from half-open', f
         $breaker->recordFailure();
     }
 
-    sleep(2);
+    Carbon::setTestNow(now()->addSeconds(2));
     $breaker->isOpen();
 
     $breaker->recordSuccess();
@@ -126,7 +127,7 @@ it('dispatches CircuitBreakerOpened event when probe fails in half-open state', 
         $breaker->recordFailure();
     }
 
-    sleep(2);
+    Carbon::setTestNow(now()->addSeconds(2));
     $breaker->isOpen();
 
     expect($breaker->isHalfOpen())->toBeTrue();

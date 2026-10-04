@@ -35,7 +35,7 @@ final readonly class HeldJob
 
         return new self(
             uuid: $uuid,
-            createdAt: (int) ($payload['createdAt'] ?? time()),
+            createdAt: (int) ($payload['createdAt'] ?? now()->getTimestamp()),
             name: (string) ($payload['displayName'] ?? 'unknown'),
         );
     }

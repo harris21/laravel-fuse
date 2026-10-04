@@ -78,6 +78,15 @@ it('keeps the first-seen job on a same-second tie', function () {
     expect(candidateFor()['uuid'])->toBe('first');
 });
 
+it('dates a held job without a createdAt by the Carbon clock', function () {
+    Carbon::setTestNow('2026-01-01 12:00:00');
+    $queueJob = Mockery::mock(Job::class);
+    $queueJob->shouldReceive('uuid')->andReturn('legacy');
+    $queueJob->shouldReceive('payload')->andReturn(['uuid' => 'legacy', 'displayName' => 'App\\Jobs\\ChargeCustomer']);
+
+    expect(HeldJob::fromQueueJob($queueJob)->createdAt)->toBe(now()->getTimestamp());
+});
+
 it('uses the middleware release override for the candidate ttl', function () {
     Carbon::setTestNow(Carbon::now());
     config(['fuse.default_timeout' => 1]);
@@ -178,7 +187,7 @@ it('keeps the same job as the probe after a failed probe', function () {
     $middleware = new CircuitBreakerMiddleware('test-service');
     $middleware->handle(makeQueuedJob('older', 1000), fn () => 'success');
 
-    sleep(2);
+    Carbon::setTestNow(now()->addSeconds(2));
     config(['fuse.default_timeout' => 1]);
     (new CircuitBreaker('test-service'))->isOpen();
     expect((new CircuitBreaker('test-service'))->isHalfOpen())->toBeTrue();

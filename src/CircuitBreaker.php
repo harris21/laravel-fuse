@@ -112,7 +112,7 @@ class CircuitBreaker
 
         $openedAt = Cache::get($this->key('opened_at'));
 
-        if ($openedAt && (time() - $openedAt) >= $this->timeout) {
+        if ($openedAt !== null && (now()->getTimestamp() - $openedAt) >= $this->timeout) {
             $this->transitionTo(CircuitState::HalfOpen);
 
             return ! $this->isHalfOpen();
@@ -248,7 +248,7 @@ class CircuitBreaker
             'failures' => $failures,
             'failure_rate' => $attempts > 0 ? round(($failures / $attempts) * 100, 1) : 0,
             'opened_at' => $openedAt,
-            'recovery_at' => $openedAt ? (int) $openedAt + $this->timeout : null,
+            'recovery_at' => $openedAt !== null ? (int) $openedAt + $this->timeout : null,
             'timeout' => $this->timeout,
             'threshold' => $this->failureThreshold,
             'min_requests' => $this->minRequests,
@@ -320,7 +320,7 @@ class CircuitBreaker
             Cache::put($this->key('state'), $newState->value);
 
             if ($newState === CircuitState::Open) {
-                Cache::put($this->key('opened_at'), time());
+                Cache::put($this->key('opened_at'), now()->getTimestamp());
             }
 
             if ($newState === CircuitState::Closed) {

@@ -1,5 +1,6 @@
 <?php
 
+use Carbon\Carbon;
 use Harris21\Fuse\CircuitBreaker;
 use Harris21\Fuse\Events\CircuitBreakerClosed;
 use Harris21\Fuse\Events\CircuitBreakerHalfOpen;
@@ -324,7 +325,7 @@ it('executes probe and closes circuit on success in half-open state', function (
 
     expect($breaker->isOpen())->toBeTrue();
 
-    sleep(2);
+    Carbon::setTestNow(now()->addSeconds(2));
 
     $breaker->isOpen();
     expect($breaker->isHalfOpen())->toBeTrue();
@@ -357,7 +358,7 @@ it('reopens circuit on failure in half-open state', function () {
         $breaker->recordFailure();
     }
 
-    sleep(2);
+    Carbon::setTestNow(now()->addSeconds(2));
     $breaker->isOpen();
     expect($breaker->isHalfOpen())->toBeTrue();
 
@@ -386,7 +387,7 @@ it('releases non-probe workers in half-open state', function () {
         $breaker->recordFailure();
     }
 
-    sleep(2);
+    Carbon::setTestNow(now()->addSeconds(2));
     $breaker->isOpen();
     expect($breaker->isHalfOpen())->toBeTrue();
     $prefix = config('fuse.cache.prefix');
@@ -429,7 +430,7 @@ it('runs the probe when a CircuitBreakerHalfOpen listener throws', function () {
     Exceptions::fake();
     $breaker = new CircuitBreaker('test-service');
     $breaker->forceOpen();
-    Cache::put($breaker->key('opened_at'), time() - $breaker->timeout() - 1);
+    Cache::put($breaker->key('opened_at'), now()->getTimestamp() - $breaker->timeout() - 1);
     Event::listen(CircuitBreakerHalfOpen::class, fn () => throw new RuntimeException('listener down'));
 
     $calls = 0;

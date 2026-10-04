@@ -113,10 +113,34 @@ it('transitions to half-open after timeout', function () {
 
     expect($breaker->isOpen())->toBeTrue();
 
-    sleep(2);
+    Carbon::setTestNow(now()->addSeconds(2));
 
     expect($breaker->isOpen())->toBeFalse();
     expect($breaker->isHalfOpen())->toBeTrue();
+});
+
+it('times the open circuit by the Carbon clock', function () {
+    $breaker = new CircuitBreaker('test-service');
+    $breaker->forceOpen();
+
+    Carbon::setTestNow(now()->addSeconds(59));
+    expect($breaker->isOpen())->toBeTrue();
+
+    Carbon::setTestNow(now()->addSecond());
+    expect($breaker->isOpen())->toBeFalse()
+        ->and($breaker->isHalfOpen())->toBeTrue();
+});
+
+it('recovers a circuit opened at the Unix epoch', function () {
+    Carbon::setTestNow(Carbon::createFromTimestamp(0));
+    $breaker = new CircuitBreaker('test-service');
+    $breaker->forceOpen();
+
+    expect($breaker->getStats()['recovery_at'])->toBe(60);
+
+    Carbon::setTestNow(now()->addSeconds(60));
+    expect($breaker->isOpen())->toBeFalse()
+        ->and($breaker->isHalfOpen())->toBeTrue();
 });
 
 it('transitions to closed on success in half-open state', function () {
@@ -128,7 +152,7 @@ it('transitions to closed on success in half-open state', function () {
         $breaker->recordFailure();
     }
 
-    sleep(2);
+    Carbon::setTestNow(now()->addSeconds(2));
     $breaker->isOpen();
 
     expect($breaker->isHalfOpen())->toBeTrue();
@@ -155,7 +179,7 @@ it('keeps a successful half-open probe closed when candidate cleanup fails', fun
 
     $breaker = new CircuitBreaker('test-service');
     $breaker->forceOpen();
-    Cache::put($breaker->key('opened_at'), time() - 61);
+    Cache::put($breaker->key('opened_at'), now()->getTimestamp() - 61);
     $breaker->isOpen();
 
     expect($breaker->isHalfOpen())->toBeTrue();
@@ -256,7 +280,7 @@ it('transitions back to open on failure in half-open state', function () {
         $breaker->recordFailure();
     }
 
-    sleep(2);
+    Carbon::setTestNow(now()->addSeconds(2));
     $breaker->isOpen();
 
     expect($breaker->isHalfOpen())->toBeTrue();
@@ -578,7 +602,7 @@ it('stays open for a worker that loses the half-open transition lock', function 
         $breaker->recordFailure();
     }
 
-    sleep(2);
+    Carbon::setTestNow(now()->addSeconds(2));
 
     $transition = Cache::lock($breaker->key('transition'), 5);
     expect($transition->get())->toBeTrue();
