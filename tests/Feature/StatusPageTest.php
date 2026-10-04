@@ -3,6 +3,7 @@
 use Harris21\Fuse\CircuitBreaker;
 use Illuminate\Auth\GenericUser;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Exceptions;
 use Illuminate\Support\Facades\Gate;
 
 beforeEach(function () {
@@ -30,6 +31,7 @@ it('returns 200 when status page is enabled and gate allows', function () {
 
     $this->get('/fuse')
         ->assertSuccessful()
+        ->assertViewHas('dataAvailable', fn ($available) => $available === true)
         ->assertSee('Probe candidate')
         ->assertSee('Elected probe');
 });
@@ -238,4 +240,43 @@ it('returns 404 to a signed-in user when the status page is disabled behind auth
 
     $this->actingAs(new GenericUser(['id' => 1]))->get('/fuse')->assertNotFound();
     $this->actingAs(new GenericUser(['id' => 1]))->getJson('/fuse/data')->assertNotFound();
+});
+
+it('answers the data endpoint with 503 when the cache cannot be read', function () {
+    Exceptions::fake();
+    config(['fuse.status_page.enabled' => true]);
+    Gate::define('viewFuse', fn ($user = null) => true);
+    config(['fuse.services' => ['stripe' => ['threshold' => 50]]]);
+    useCacheThatIsDown();
+
+    $this->getJson('/fuse/data')
+        ->assertServiceUnavailable()
+        ->assertExactJson(['message' => 'Circuit data is unavailable.']);
+    Exceptions::assertReported(fn (RuntimeException $e) => $e->getMessage() === 'cache unreachable');
+});
+
+it('renders the page as unavailable when the cache cannot be read', function () {
+    Exceptions::fake();
+    config(['fuse.status_page.enabled' => true]);
+    Gate::define('viewFuse', fn ($user = null) => true);
+    config(['fuse.services' => ['stripe' => ['threshold' => 50]]]);
+    useCacheThatIsDown();
+
+    $this->get('/fuse')
+        ->assertSuccessful()
+        ->assertViewHas('initialData', fn ($data) => $data === [])
+        ->assertViewHas('dataAvailable', fn ($available) => $available === false)
+        ->assertSee('const dataAvailable = false;', false);
+    Exceptions::assertReported(fn (RuntimeException $e) => $e->getMessage() === 'cache unreachable');
+});
+
+it('keeps the outage responses when reporting fails', function () {
+    config(['fuse.status_page.enabled' => true]);
+    Gate::define('viewFuse', fn ($user = null) => true);
+    config(['fuse.services' => ['stripe' => ['threshold' => 50]]]);
+    useCacheThatIsDown();
+    Exceptions::reportable(fn (RuntimeException $e) => throw new LogicException('reporter down'));
+
+    $this->getJson('/fuse/data')->assertServiceUnavailable();
+    $this->get('/fuse')->assertSuccessful();
 });
